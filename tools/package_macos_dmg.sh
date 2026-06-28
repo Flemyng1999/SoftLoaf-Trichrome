@@ -16,6 +16,13 @@ if [[ ! -f "${build_dir}/CMakeCache.txt" ]]; then
   exit 2
 fi
 
+deployment_target="$(awk -F= '/^CMAKE_OSX_DEPLOYMENT_TARGET:/{print $2}' "${build_dir}/CMakeCache.txt" | tail -1 || true)"
+if [[ "${deployment_target}" != "15.0" ]]; then
+  echo "package-macos: build must target macOS 15.0; got '${deployment_target:-unset}'" >&2
+  echo "package-macos: reconfigure with cmake -S . -B ${build_dir} -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 ..." >&2
+  exit 2
+fi
+
 cmake --build "${build_dir}" --target "${app_target}"
 
 if [[ ! -d "${app}/Contents" ]]; then
@@ -77,6 +84,7 @@ done
 
 codesign_retry "${sign_args[@]}" "${app}"
 codesign --verify --deep --strict --verbose=2 "${app}"
+"${repo_root}/tools/check_macos_compatibility.sh" "${app}"
 
 rm -rf "${staging}"
 mkdir -p "${staging}"

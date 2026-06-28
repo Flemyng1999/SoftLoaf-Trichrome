@@ -1,5 +1,10 @@
 cmake_minimum_required(VERSION 3.22)
 
+if(APPLE)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "15.0" CACHE STRING
+        "Minimum macOS version supported by SoftLoaf Trichrome")
+endif()
+
 project(SoftLoafTrichrome
     VERSION 0.1.0
     DESCRIPTION "Standalone SoftLoaf trichrome desktop app and core"
@@ -12,6 +17,13 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(SOFTLOAF_TRICHROME_BUILD_TOOLS "Build command line tools" ON)
 option(SOFTLOAF_TRICHROME_BUILD_TESTS "Build smoke tests" ON)
 option(SOFTLOAF_TRICHROME_BUILD_APP "Build Qt desktop app" ON)
+
+if(WIN32)
+    add_compile_definitions(
+        WINVER=0x0A00
+        _WIN32_WINNT=0x0A00
+        NTDDI_VERSION=0x0A000000)
+endif()
 
 find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs)
 find_package(PkgConfig REQUIRED)
@@ -70,6 +82,7 @@ if(SOFTLOAF_TRICHROME_BUILD_APP)
 
     set_target_properties(softloaf_trichrome_app PROPERTIES
         MACOSX_BUNDLE TRUE
+        WIN32_EXECUTABLE TRUE
         MACOSX_BUNDLE_BUNDLE_NAME "SoftLoaf Trichrome"
         MACOSX_BUNDLE_GUI_IDENTIFIER "art.revela.softloaf-trichrome"
         MACOSX_BUNDLE_ICON_FILE "AppIcon.icns"

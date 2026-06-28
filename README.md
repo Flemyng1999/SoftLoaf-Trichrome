@@ -36,6 +36,11 @@ Negative: common RAW formats (`.3fr`, `.dng`, `.arw`, `.cr2`, `.cr3`, `.nef`,
 `.raf`, `.rw2`, `.orf`, `.pef`, `.srw`, etc.) via LibRaw, plus TIFF/JPEG/PNG via
 OpenCV.
 
+## Platform Support
+
+- macOS 15.0 or newer
+- Windows 10 and Windows 11
+
 ## Build
 
 ```bash

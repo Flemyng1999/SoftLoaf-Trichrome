@@ -19,6 +19,11 @@ Negative:
 - `resources/AppIcon.ico`
 - `docs/logo/logo.svg`
 
+Supported release platforms:
+
+- macOS 15.0 or newer
+- Windows 10 and Windows 11
+
 ## macOS
 
 Recommended distribution:
@@ -27,6 +32,17 @@ Recommended distribution:
 - Signing: Apple Developer ID Application certificate
 - Notarization: Apple notary service
 - Deployment helper: `macdeployqt`
+- Build deployment target: `CMAKE_OSX_DEPLOYMENT_TARGET=15.0`
+
+Compatibility requirement: every Mach-O file inside the final app bundle must
+have `LC_BUILD_VERSION minos <= 15.0`. The package script runs
+`tools/check_macos_compatibility.sh` after deployment and signing.
+
+Do not use dependency binaries built with a newer minimum OS for release
+artifacts. Homebrew packages installed on a newer macOS can be built with a
+newer `minos` than this app supports; those builds are acceptable for local
+development only, not for the public macOS 15+ release. Use a dependency build
+route that produces Qt/OpenCV/LibRaw binaries targeting macOS 15.0.
 
 Local unsigned smoke package:
 
@@ -67,20 +83,24 @@ Suggested GitHub Actions secrets for a future packaging workflow:
 
 The first automated macOS release workflow should:
 
-1. install Qt, OpenCV, LibRaw, and Ninja;
-2. configure and build Release;
+1. install or restore Qt, OpenCV, LibRaw, and Ninja builds targeting macOS 15.0;
+2. configure and build Release with `CMAKE_OSX_DEPLOYMENT_TARGET=15.0`;
 3. run CTest;
 4. run `macdeployqt`;
-5. sign nested frameworks and the app bundle;
-6. create a DMG;
-7. notarize and staple;
-8. upload the artifact to a GitHub release.
+5. run `tools/check_macos_compatibility.sh`;
+6. sign nested frameworks and the app bundle;
+7. create a DMG;
+8. notarize and staple;
+9. upload the artifact to a GitHub release.
 
 ## Windows EXE
 
 The most convenient user-facing Windows package is a zip or installer containing
 the `.exe` plus Qt/OpenCV/LibRaw runtime files. That is simpler than MSIX for
 early testers, but it has a signing tradeoff.
+
+Supported Windows versions are Windows 10 and Windows 11. CMake defines
+`WINVER`, `_WIN32_WINNT`, and `NTDDI_VERSION` for the Windows 10 API family.
 
 - Unsigned `.exe`: easiest, but Windows SmartScreen will warn heavily.
 - OV Authenticode certificate: common independent-developer route; cheaper than
