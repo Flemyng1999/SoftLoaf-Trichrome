@@ -155,6 +155,57 @@ or App Store Connect API key credentials:
 
 Release notes live under `docs/release_notes/`.
 
+Use Clash Verge Rev v2.5.1 as the public release page benchmark:
+<https://github.com/clash-verge-rev/clash-verge-rev/releases/tag/v2.5.1>
+
+The benchmark shape is:
+
+- concise version heading and changelog;
+- explicit platform download section in the release body;
+- architecture/runtime variants named in the asset filename;
+- detached signature files when signing is configured;
+- a machine-readable update manifest such as `latest.json` when auto-update is
+  implemented;
+- all assets uploaded to a draft before publishing.
+
+SoftLoaf does not need to mirror every Clash Verge platform immediately. For
+alpha releases, match the structure while only publishing supported artifacts.
+The required public asset naming pattern is:
+
+```text
+SoftLoaf.Trichrome_<version>_x64.dmg
+SoftLoaf.Trichrome_<version>_x64-setup.exe
+SoftLoaf.Trichrome_<version>_x64-portable.zip
+SoftLoaf.Trichrome_<version>_x64.sha256
+```
+
+When Authenticode signing is configured, add detached signature assets next to
+Windows downloads:
+
+```text
+SoftLoaf.Trichrome_<version>_x64-setup.exe.sig
+SoftLoaf.Trichrome_<version>_x64-portable.zip.sig
+```
+
+When Sparkle, WinSparkle, or another updater exists, add:
+
+```text
+latest.json
+```
+
+The current workflow names are still accepted for `v0.1.0-alpha.1`, but new
+release automation should migrate to the dotted product prefix and underscore
+version separator above so the asset list reads like the benchmark release.
+
+Every release note should follow this order:
+
+1. short alpha/stable warning;
+2. `Downloads` grouped by platform and architecture;
+3. `Changes`;
+4. `Known Limitations`;
+5. `Verification` with SHA256 and signing state;
+6. `Packaging Notes` only when the release has unusual constraints.
+
 ```bash
 git add docs/release_notes/v0.1.0-alpha.1.md
 git commit -m "Add v0.1.0-alpha.1 release notes"
