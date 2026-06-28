@@ -87,11 +87,20 @@ $InstallerScript = Join-Path $RepoRoot "tools\windows_installer.nsi"
 $QmlDir = Join-Path $RepoRoot "qml"
 $TripletBin = Join-Path $InstallRoot "bin"
 $QtToolsDir = Join-Path $InstallRoot "tools\Qt6\bin"
-$Windeployqt = Join-Path $QtToolsDir "windeployqt.exe"
+$WindeployqtCandidates = @()
+if (-not [string]::IsNullOrWhiteSpace($env:QT_ROOT_DIR)) {
+    $WindeployqtCandidates += Join-Path $env:QT_ROOT_DIR "bin\windeployqt.exe"
+}
+$WindeployqtCandidates += Join-Path $QtToolsDir "windeployqt.exe"
+$WindeployqtCommand = Get-Command windeployqt.exe -ErrorAction SilentlyContinue
+if ($WindeployqtCommand) {
+    $WindeployqtCandidates += $WindeployqtCommand.Source
+}
+$Windeployqt = $WindeployqtCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
 $Makensis = (Get-Command makensis.exe -ErrorAction SilentlyContinue)
 
-if (-not (Test-Path -LiteralPath $Windeployqt)) {
-    throw "windeployqt.exe not found at $Windeployqt"
+if (-not $Windeployqt) {
+    throw "windeployqt.exe not found. Checked: $($WindeployqtCandidates -join ', ')"
 }
 if (-not $Makensis) {
     throw "makensis.exe not found. Install NSIS first."
