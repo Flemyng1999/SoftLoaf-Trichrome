@@ -95,7 +95,7 @@ jobs:
       - name: Install build tools
         run: |
           brew update
-          brew install ninja pkg-config
+          brew install ninja pkg-config autoconf autoconf-archive automake libtool
 
       - name: Restore vcpkg binary cache
         uses: actions/cache@v4
@@ -111,6 +111,14 @@ jobs:
           git -C "${VCPKG_ROOT}" checkout "${VCPKG_COMMIT}"
           "${VCPKG_ROOT}/bootstrap-vcpkg.sh" -disableMetrics
           mkdir -p "${VCPKG_DEFAULT_BINARY_CACHE}"
+
+      - name: Install vcpkg dependencies
+        run: |
+          mkdir -p build-release
+          "${VCPKG_ROOT}/vcpkg" install \
+            --triplet arm64-osx \
+            --x-manifest-root="${GITHUB_WORKSPACE}" \
+            --x-install-root="${GITHUB_WORKSPACE}/build-release/vcpkg_installed"
 
       - name: Configure
         run: |
