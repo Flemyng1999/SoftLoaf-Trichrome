@@ -55,7 +55,7 @@ ApplicationWindow {
                         }
 
                         Text {
-                            text: trichromeController.status
+                            text: (trichromeController.dirty ? "Unsaved · " : "") + trichromeController.status
                             color: "#aab2bb"
                             font.pixelSize: 13
                             elide: Text.ElideRight
@@ -77,6 +77,48 @@ ApplicationWindow {
 
                         Button {
                             Layout.fillWidth: true
+                            text: "Open"
+                            icon.name: "document-open-recent"
+                            enabled: !trichromeController.busy
+                            onClicked: trichromeController.openProject()
+                        }
+
+                        Button {
+                            Layout.fillWidth: true
+                            text: "Save"
+                            icon.name: "document-save"
+                            enabled: !trichromeController.busy
+                            onClicked: trichromeController.saveProject()
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        Button {
+                            Layout.fillWidth: true
+                            text: "Save As"
+                            icon.name: "document-save-as"
+                            enabled: !trichromeController.busy
+                            onClicked: trichromeController.saveProjectAs()
+                        }
+
+                        Button {
+                            Layout.fillWidth: true
+                            text: "Clear"
+                            icon.name: "edit-clear"
+                            enabled: !trichromeController.busy
+                            onClicked: trichromeController.clear()
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        Button {
+                            Layout.fillWidth: true
                             text: "Files"
                             icon.name: "document-open"
                             onClicked: trichromeController.chooseFiles()
@@ -88,13 +130,6 @@ ApplicationWindow {
                             icon.name: "folder-open"
                             onClicked: trichromeController.chooseFolder()
                         }
-                    }
-
-                    Button {
-                        Layout.fillWidth: true
-                        text: "Clear"
-                        icon.name: "edit-clear"
-                        onClicked: trichromeController.clear()
                     }
 
                     Label {
@@ -321,10 +356,17 @@ ApplicationWindow {
                     }
 
                     Button {
-                        text: "Export"
+                        text: "Export Frame"
                         icon.name: "document-save"
-                        enabled: trichromeController.hasPreview && !trichromeController.busy
+                        enabled: trichromeController.activeGroup >= 0 && !trichromeController.busy
                         onClicked: trichromeController.exportActive()
+                    }
+
+                    Button {
+                        text: "Export All"
+                        icon.name: "document-save-all"
+                        enabled: trichromeController.groups.length > 0 && !trichromeController.busy
+                        onClicked: trichromeController.exportAll()
                     }
                 }
             }

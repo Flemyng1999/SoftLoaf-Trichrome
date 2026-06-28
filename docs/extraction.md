@@ -17,6 +17,9 @@ core.
 - Qt/QML desktop shell for import, grouping, preview, and export.
 - LibRaw/OpenCV desktop decoder for the same import extension family as the
   parent app.
+- `.sltrichrome` project JSON persistence for source paths, ordering, grouping,
+  role order, sensor mode, and active frame.
+- Background preview/export tasks with worker drain on open, clear, and quit.
 - Smoke CLI and CTest target.
 
 ## Not Included Yet
@@ -24,7 +27,6 @@ core.
 - Parent app `ProjectController` integration.
 - Licensing gates.
 - DCP/profile lookup.
-- SoftLoaf project JSON persistence.
 - Full historical test suite from the parent repository.
 
 ## Re-Integration Plan

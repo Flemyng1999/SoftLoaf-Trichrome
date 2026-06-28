@@ -9,7 +9,8 @@ The core workflow is:
 - group photos three at a time as R/G/B captures;
 - choose monochrome or Bayer source mode;
 - preview the composed frame;
-- export PNG/TIFF/JPEG.
+- save/open a `.sltrichrome` project;
+- export the active frame or all complete frames as PNG/TIFF/JPEG.
 
 The C++ core also remains usable as a small library and CLI test target:
 
@@ -21,6 +22,8 @@ The C++ core also remains usable as a small library and CLI test target:
 - atomic RGB16 NPY artifact writing.
 - structured diagnostic logs;
 - latest-wins preview compose tasks;
+- async full-resolution export tasks;
+- project JSON persistence;
 - content-addressed preview cache;
 - QML display handoff through an image provider.
 

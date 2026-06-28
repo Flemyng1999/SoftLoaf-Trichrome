@@ -34,6 +34,8 @@ if(SOFTLOAF_TRICHROME_BUILD_APP)
         src/desktop_decoder.hpp
         src/obs_log.cpp
         src/obs_log.hpp
+        src/project_store.cpp
+        src/project_store.hpp
         src/trichrome_cache.cpp
         src/trichrome_cache.hpp
         src/trichrome_controller.cpp
@@ -78,6 +80,7 @@ if(SOFTLOAF_TRICHROME_BUILD_TESTS)
         add_executable(trichrome_desktop_core_test
             tests/trichrome_desktop_core_test.cpp
             src/obs_log.cpp
+            src/project_store.cpp
             src/trichrome_cache.cpp)
         target_include_directories(trichrome_desktop_core_test PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/src)

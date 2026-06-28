@@ -18,6 +18,8 @@ int main(int argc, char* argv[]) {
 
     auto* image_provider = new TrichromeImageProvider();
     TrichromeController controller(image_provider);
+    QObject::connect(&app, &QCoreApplication::aboutToQuit,
+                     &controller, [&controller]() { controller.shutdown(); });
 
     QQmlApplicationEngine engine;
     engine.addImageProvider("trichrome", image_provider);

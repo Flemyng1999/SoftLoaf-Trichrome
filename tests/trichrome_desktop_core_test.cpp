@@ -11,6 +11,7 @@
 #include <QStandardPaths>
 
 #include "obs_log.hpp"
+#include "project_store.hpp"
 #include "trichrome_cache.hpp"
 
 namespace fs = std::filesystem;
@@ -88,6 +89,49 @@ void TestPreviewCacheIdentityAndHit() {
     fs::remove_all(root, ec);
 }
 
+void TestProjectStoreRoundTrip() {
+    const fs::path root = fs::temp_directory_path() / "softloaf_trichrome_project_test";
+    std::error_code ec;
+    fs::remove_all(root, ec);
+    const fs::path project_path = root / "project" / "session.sltrichrome";
+    const fs::path r = WriteFile(root / "project" / "roll" / "R.raf", "red");
+    const fs::path g = WriteFile(root / "project" / "roll" / "G.raf", "green");
+    const fs::path b = WriteFile(root / "project" / "roll" / "B.raf", "blue");
+
+    desktop::ProjectDocument saved;
+    saved.sensor_mode = "bayer";
+    saved.role_order = "BGR";
+    saved.sort_mode = "selection";
+    saved.active_group = 0;
+    saved.files = {{r, 2}, {g, 1}, {b, 0}};
+
+    std::string err;
+    assert(desktop::SaveProjectDocument(project_path, saved, &err));
+    assert(err == "ok");
+    assert(fs::exists(project_path));
+
+    desktop::ProjectDocument loaded;
+    assert(desktop::LoadProjectDocument(project_path, &loaded, &err));
+    assert(err == "ok");
+    assert(loaded.schema_version == 1);
+    assert(loaded.sensor_mode == "bayer");
+    assert(loaded.role_order == "BGR");
+    assert(loaded.sort_mode == "selection");
+    assert(loaded.active_group == 0);
+    assert(loaded.files.size() == 3);
+    assert(loaded.files[0].selection_index == 2);
+    assert(loaded.files[1].selection_index == 1);
+    assert(loaded.files[2].selection_index == 0);
+    assert(fs::weakly_canonical(loaded.files[0].path, ec) ==
+           fs::weakly_canonical(r, ec));
+    assert(fs::weakly_canonical(loaded.files[1].path, ec) ==
+           fs::weakly_canonical(g, ec));
+    assert(fs::weakly_canonical(loaded.files[2].path, ec) ==
+           fs::weakly_canonical(b, ec));
+
+    fs::remove_all(root, ec);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -97,5 +141,6 @@ int main(int argc, char** argv) {
 
     TestObsLogSink();
     TestPreviewCacheIdentityAndHit();
+    TestProjectStoreRoundTrip();
     return 0;
 }
