@@ -5,10 +5,21 @@
   "builtin-baseline": "a0400024711b283056538ac19ced80b91a83c24c",
   "dependencies": [
     "libraw",
-    "opencv4",
+    {
+      "name": "opencv4",
+      "default-features": false,
+      "features": [
+        "fs",
+        "intrinsics",
+        "jpeg",
+        "png",
+        "thread",
+        "tiff",
+        "webp"
+      ]
+    },
     "qtbase",
     "qtdeclarative",
-    "qtsvg",
     "qttools"
   ]
 }
