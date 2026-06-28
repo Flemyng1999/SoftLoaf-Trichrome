@@ -4,9 +4,20 @@
 #include <array>
 #include <cctype>
 #include <cmath>
-#include <dlfcn.h>
 #include <memory>
 #include <string>
+
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#else
+#include <dlfcn.h>
+#endif
 
 #include <libraw/libraw.h>
 #include <opencv2/imgcodecs.hpp>
@@ -81,8 +92,25 @@ void ConfigureRawDecodeParams(LibRaw* raw, DecodeMode decode_mode) {
 void LimitOpenMpForPreviewDecode(DecodeMode decode_mode) {
     if (decode_mode != DecodeMode::kPreview) return;
     using OmpSetNumThreads = void (*)(int);
+#if defined(_WIN32)
+    static const auto omp_set_num_threads = []() -> OmpSetNumThreads {
+        static constexpr const char* kOpenMpModules[] = {
+            "vcomp140.dll",
+            "libomp.dll",
+            "libiomp5md.dll",
+        };
+        for (const char* module_name : kOpenMpModules) {
+            HMODULE module = GetModuleHandleA(module_name);
+            if (!module) continue;
+            FARPROC proc = GetProcAddress(module, "omp_set_num_threads");
+            if (proc) return reinterpret_cast<OmpSetNumThreads>(proc);
+        }
+        return nullptr;
+    }();
+#else
     static const auto omp_set_num_threads = reinterpret_cast<OmpSetNumThreads>(
         dlsym(RTLD_DEFAULT, "omp_set_num_threads"));
+#endif
     if (omp_set_num_threads) omp_set_num_threads(1);
 }
 
