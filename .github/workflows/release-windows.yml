@@ -57,7 +57,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
-          key: windows-2022-vcpkg-${{ env.VCPKG_COMMIT }}-${{ hashFiles('vcpkg.json') }}
+          key: windows-2022-vcpkg-${{ env.VCPKG_COMMIT }}-${{ hashFiles('.github/vcpkg/windows/vcpkg.json') }}
           restore-keys: |
             windows-2022-vcpkg-${{ env.VCPKG_COMMIT }}-
 
@@ -75,9 +75,8 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path build-windows | Out-Null
           & "$env:SOFTLOAF_VCPKG_ROOT\vcpkg.exe" install `
-            --classic `
-            "libraw:x64-windows" `
-            "opencv4[fs,intrinsics,jpeg,png,thread,tiff,webp]:x64-windows" `
+            --triplet x64-windows `
+            --x-manifest-root="$env:GITHUB_WORKSPACE\.github\vcpkg\windows" `
             --x-install-root="$env:GITHUB_WORKSPACE\build-windows\vcpkg_installed"
 
       - name: Configure
