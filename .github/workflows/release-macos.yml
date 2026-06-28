@@ -144,4 +144,5 @@ jobs:
             --title "SoftLoaf Trichrome ${tag}" \
             --notes-file "${notes}" \
             --draft \
+            --prerelease \
             --verify-tag
