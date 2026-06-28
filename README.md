@@ -1,47 +1,85 @@
 # SoftLoaf Trichrome
 
-Standalone Qt/QML + C++ desktop app for composing trichrome photo batches into
-finished RGB frames.
+<p align="center">
+  <img src="docs/logo/softloaf-macos-icon.png" width="128" alt="SoftLoaf Trichrome app icon">
+</p>
 
-The core workflow is:
+<p align="center">
+  A standalone desktop workspace for composing three-shot trichrome captures into finished RGB images.
+</p>
 
-- choose files or a folder;
-- group photos three at a time as R/G/B captures;
-- choose monochrome or Bayer source mode;
-- preview the composed frame;
-- export the active frame or all complete frames as PNG/TIFF/JPEG.
+<p align="center">
+  <a href="https://github.com/Flemyng1999/SoftLoaf-Trichrome/releases">Downloads</a>
+  ·
+  <a href="docs/release.md">Release Notes</a>
+  ·
+  <a href="docs/architecture.md">Architecture</a>
+  ·
+  <a href="docs/todo.md">Roadmap</a>
+</p>
 
-The C++ core also remains usable as a small library and CLI test target:
+SoftLoaf Trichrome is a Qt/QML and C++ application for photographers working
+with sequential red, green, and blue captures. It imports triplets from RAW or
+standard image files, previews the composed color frame, and exports finished
+images for editing or archival workflows.
 
-- trichrome file grouping and stable JSON import reports;
-- project/input model structs needed by trichrome artifacts;
-- artifact identity and stale/missing/dirty guards;
-- structure correlation diagnostics;
-- mono/Bayer role composition into RGB;
-- atomic RGB16 NPY artifact writing.
-- structured diagnostic logs;
-- latest-wins preview compose tasks;
-- half-size RAW reads plus 4096 px long-edge composed preview cache, with
-  full-resolution RAW reads reserved for export;
-- async full-resolution export tasks;
-- explicit TIFF/PNG 8-bit or 16-bit export, with 16-bit as the professional
-  default;
-- content-addressed preview cache;
-- QML display handoff through an image provider;
-- fixed sRGB display/preview, with larger linear working/export spaces such as
-  ACES AP0, ACEScg, ProPhoto RGB, and Rec.2020 reserved for export.
+This project is currently alpha software. The image pipeline, RAW compatibility,
+and release packaging are actively being hardened.
 
-The desktop decoder supports the same import extension family as SoftLoaf
-Negative: common RAW formats (`.3fr`, `.dng`, `.arw`, `.cr2`, `.cr3`, `.nef`,
-`.raf`, `.rw2`, `.orf`, `.pef`, `.srw`, etc.) via LibRaw, plus TIFF/JPEG/PNG via
-OpenCV.
+## Downloads
 
-## Platform Support
+Prebuilt alpha packages are published on the
+[GitHub Releases](https://github.com/Flemyng1999/SoftLoaf-Trichrome/releases)
+page.
 
-- macOS 15.0 or newer
-- Windows 10 and Windows 11
+| Platform | Package | Status |
+| --- | --- | --- |
+| macOS 15.0 or newer | DMG | Signed and notarized release workflow |
+| Windows 10/11 x64 | Installer and portable zip | Unsigned alpha tester build |
 
-## Build
+Windows SmartScreen may warn because the alpha Windows builds are not yet
+Authenticode signed. Verify downloads with the `.sha256` files attached to each
+release.
+
+## Features
+
+- Import individual files or folders of trichrome source images.
+- Group captures into R/G/B frames by filename order or selection order.
+- Switch between Bayer and monochrome source assumptions.
+- Decode common camera RAW formats through LibRaw.
+- Decode TIFF, JPEG, and PNG inputs through OpenCV.
+- Preview composed trichrome frames in the desktop app.
+- Cache previews for faster repeat interactions.
+- Export the current frame or all complete frames.
+- Export TIFF, PNG, or JPEG.
+- Prefer 16-bit TIFF/PNG output for higher-quality handoff.
+- Select export color spaces including sRGB, Display P3, Adobe RGB, Rec.2020,
+  ProPhoto RGB Linear, ACES AP0 Linear, and ACEScg/AP1 Linear.
+
+## Workflow
+
+1. Click `Import` and choose three-shot source files or a folder.
+2. Choose the sensor mode: `Bayer` or `Monochrome`.
+3. Choose grouping mode and channel order, such as `RGB` or `BGR`.
+4. Select a complete frame from the sidebar.
+5. Preview the composed result.
+6. Export a single frame or all complete frames.
+
+The desktop decoder supports the same RAW-oriented import family used by
+SoftLoaf Negative, including `.3fr`, `.dng`, `.arw`, `.cr2`, `.cr3`, `.nef`,
+`.raf`, `.rw2`, `.orf`, `.pef`, and `.srw`, plus TIFF/JPEG/PNG.
+
+## Build From Source
+
+### macOS
+
+Install dependencies with Homebrew for local development:
+
+```bash
+brew install cmake ninja pkg-config qt opencv libraw
+```
+
+Configure, build, and test:
 
 ```bash
 cmake -S . -B build -G Ninja \
@@ -50,25 +88,58 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-## Run The Desktop App
+Run the app:
 
 ```bash
 open build/softloaf_trichrome_app.app
 ```
 
-See [docs/architecture.md](docs/architecture.md) for the current log, cache,
-display, and task lifecycle boundaries. The working backlog lives in
-[docs/todo.md](docs/todo.md).
+### Windows
 
-Release and packaging notes live in [docs/release.md](docs/release.md).
+The release workflow builds on `windows-2022` with prebuilt Qt and a trimmed
+vcpkg manifest for OpenCV and LibRaw. See [docs/release.md](docs/release.md)
+for the exact packaging route.
 
-## CLI
+For local Windows development, use the same dependency split:
+
+- Qt from the official Qt/MSVC distribution;
+- OpenCV and LibRaw from vcpkg;
+- CMake + Ninja + MSVC.
+
+## Command Line Checks
+
+The repository also builds a small diagnostic CLI:
 
 ```bash
 ./build/softloaf_trichrome_check --synthetic-mono-oracle
 ./build/softloaf_trichrome_check --folder /path/to/rgb-roll
 ./build/softloaf_trichrome_check --file R.raf --file G.raf --file B.raf
 ```
+
+The CLI is primarily for smoke tests, grouping diagnostics, and development
+checks. The main user experience is the desktop app.
+
+## Project Notes
+
+- [Architecture](docs/architecture.md) describes cache, logging, display, and
+  task lifecycle boundaries.
+- [Release and packaging](docs/release.md) records the fixed macOS and Windows
+  packaging process.
+- [Roadmap](docs/todo.md) tracks current work.
+
+## Release Policy
+
+Release builds are produced in clean CI environments:
+
+- macOS release builds are pinned to `macos-15` with
+  `CMAKE_OSX_DEPLOYMENT_TARGET=15.0`.
+- Windows release builds are pinned to `windows-2022`.
+- Windows Qt is installed from the official prebuilt Qt distribution.
+- Windows OpenCV/LibRaw dependencies are installed from the release-specific
+  vcpkg manifest at `.github/vcpkg/windows/vcpkg.json`.
+
+Do not publish local macOS DMGs produced from a newer Homebrew environment when
+bundled dependencies report a deployment target newer than macOS 15.0.
 
 ## License
 
@@ -80,14 +151,15 @@ or binaries requires providing the corresponding source code under the same
 license.
 
 `SoftLoaf`, `SoftLoaf Trichrome`, official icons, signing identities, and store
-listings are not licensed for use by forks. See [TRADEMARKS.md](TRADEMARKS.md).
-Closed-source redistribution or official-brand use requires a separate
-commercial agreement; see [COMMERCIAL_LICENSE.md](COMMERCIAL_LICENSE.md).
+listings are not licensed for use by forks. See
+[TRADEMARKS.md](TRADEMARKS.md). Closed-source redistribution or official-brand
+use requires a separate commercial agreement; see
+[COMMERCIAL_LICENSE.md](COMMERCIAL_LICENSE.md).
 
 Third-party dependency notes are in
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-## RAW Test Data
+## Test Data
 
 Public RAW fixtures should not be committed to this repository. Keep fixture
 manifests and checksums in git, and cache downloaded raw.pixls.us files locally
