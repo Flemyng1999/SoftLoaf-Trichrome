@@ -33,6 +33,7 @@ Recommended distribution:
 - Notarization: Apple notary service
 - Deployment helper: `macdeployqt`
 - Build deployment target: `CMAKE_OSX_DEPLOYMENT_TARGET=15.0`
+- CI runner for release builds: `macos-15`
 
 Compatibility requirement: every Mach-O file inside the final app bundle must
 have `LC_BUILD_VERSION minos <= 15.0`. The package script runs
@@ -44,12 +45,34 @@ newer `minos` than this app supports; those builds are acceptable for local
 development only, not for the public macOS 15+ release. Use a dependency build
 route that produces Qt/OpenCV/LibRaw binaries targeting macOS 15.0.
 
-Local unsigned smoke package:
+The formal macOS release line should build on a macOS 15 environment. GitHub
+Actions workflows must pin `runs-on: macos-15`; do not use `macos-latest` for
+release builds.
+
+Recommended local release-shaped build with vcpkg:
+
+```bash
+git pull
+rm -rf build-release
+git clone https://github.com/microsoft/vcpkg.git .vcpkg
+git -C .vcpkg checkout a0400024711b283056538ac19ced80b91a83c24c
+.vcpkg/bootstrap-vcpkg.sh -disableMetrics
+
+cmake -S . -B build-release -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 \
+  -DCMAKE_TOOLCHAIN_FILE="$PWD/.vcpkg/scripts/buildsystems/vcpkg.cmake"
+
+cmake --build build-release
+ctest --test-dir build-release --output-on-failure
+```
+
+Local unsigned smoke package, for development only:
 
 ```bash
 SOFTLOAF_CODESIGN_IDENTITY="-" \
 SOFTLOAF_TRICHROME_VERSION="0.1.0-alpha.1" \
-  tools/package_macos_dmg.sh build
+  tools/package_macos_dmg.sh build-release
 ```
 
 Signed package:
@@ -57,8 +80,17 @@ Signed package:
 ```bash
 SOFTLOAF_CODESIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
 SOFTLOAF_TRICHROME_VERSION="0.1.0-alpha.1" \
-  tools/package_macos_dmg.sh build
+  tools/package_macos_dmg.sh build-release
 ```
+
+The package script automatically runs:
+
+```bash
+tools/check_macos_compatibility.sh build-release/softloaf_trichrome_app.app
+```
+
+If any Qt/OpenCV/LibRaw binary reports `minos > 15.0`, packaging fails. That
+means the dependency set is not suitable for the public macOS 15+ release.
 
 Notarization:
 
@@ -69,8 +101,11 @@ xcrun notarytool store-credentials softloaf-notary \
   --password "app-specific-password"
 
 SOFTLOAF_NOTARY_KEYCHAIN_PROFILE=softloaf-notary \
-  tools/notarize_macos_dmg.sh build/SoftLoaf-Trichrome-0.1.0-alpha.1-macOS.dmg
+  tools/notarize_macos_dmg.sh build-release/SoftLoaf-Trichrome-0.1.0-alpha.1-macOS.dmg
 ```
+
+Apple's notarization guide:
+<https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution>
 
 Suggested GitHub Actions secrets for a future packaging workflow:
 
@@ -92,6 +127,42 @@ The first automated macOS release workflow should:
 7. create a DMG;
 8. notarize and staple;
 9. upload the artifact to a GitHub release.
+
+The manual release workflow is `.github/workflows/release-macos.yml`. It runs
+on `macos-15`, bootstraps vcpkg at the baseline recorded in `vcpkg.json`,
+restores a GitHub Actions vcpkg binary cache, requires signing/notarization
+secrets, uploads the notarized DMG as a workflow artifact, and can optionally
+create a draft GitHub Release for an existing tag.
+
+`MACOS_CERTIFICATE_P12` must contain the base64-encoded Developer ID
+Application `.p12` export. `APPLE_DEVELOPER_ID_APPLICATION` should be the exact
+codesigning identity, for example
+`Developer ID Application: Your Name (TEAMID)`.
+
+## GitHub Release
+
+Release notes live under `docs/release_notes/`.
+
+```bash
+git add docs/release_notes/v0.1.0-alpha.1.md
+git commit -m "Add v0.1.0-alpha.1 release notes"
+git tag -a v0.1.0-alpha.1 -m "SoftLoaf Trichrome v0.1.0-alpha.1"
+git push origin main
+git push origin v0.1.0-alpha.1
+```
+
+Create the release as a draft first:
+
+```bash
+gh release create v0.1.0-alpha.1 \
+  build-release/SoftLoaf-Trichrome-0.1.0-alpha.1-macOS.dmg \
+  build-release/SoftLoaf-Trichrome-0.1.0-alpha.1-macOS.dmg.sha256 \
+  --title "SoftLoaf Trichrome v0.1.0-alpha.1" \
+  --notes-file docs/release_notes/v0.1.0-alpha.1.md \
+  --draft
+```
+
+Inspect the draft in GitHub before publishing it.
 
 ## Windows EXE
 
@@ -131,6 +202,17 @@ Future Windows package script should:
 6. create a zip or NSIS/Inno Setup installer;
 7. sign the installer;
 8. emit SHA256 checksums.
+
+Microsoft SignTool requires explicit digest parameters on modern signing
+commands:
+
+```powershell
+signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /a path\to\SoftLoaf-Trichrome.exe
+signtool verify /pa /v path\to\SoftLoaf-Trichrome.exe
+```
+
+SignTool reference:
+<https://learn.microsoft.com/en-us/windows/win32/seccrypto/signtool>
 
 ## Windows Store / MSIX
 

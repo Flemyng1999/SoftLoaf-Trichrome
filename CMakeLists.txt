@@ -26,8 +26,16 @@ if(WIN32)
 endif()
 
 find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs)
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(LIBRAW REQUIRED IMPORTED_TARGET libraw)
+find_package(libraw CONFIG QUIET)
+if(TARGET libraw::raw)
+    set(SOFTLOAF_LIBRAW_TARGET libraw::raw)
+elseif(TARGET libraw::raw_r)
+    set(SOFTLOAF_LIBRAW_TARGET libraw::raw_r)
+else()
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(LIBRAW REQUIRED IMPORTED_TARGET libraw)
+    set(SOFTLOAF_LIBRAW_TARGET PkgConfig::LIBRAW)
+endif()
 
 add_library(softloaf_trichrome INTERFACE)
 target_include_directories(softloaf_trichrome INTERFACE
@@ -103,7 +111,7 @@ if(SOFTLOAF_TRICHROME_BUILD_APP)
 
     target_link_libraries(softloaf_trichrome_app PRIVATE
         softloaf_trichrome
-        PkgConfig::LIBRAW
+        ${SOFTLOAF_LIBRAW_TARGET}
         Qt6::Core
         Qt6::Gui
         Qt6::Qml

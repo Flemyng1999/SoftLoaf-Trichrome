@@ -8,7 +8,7 @@ on:
 jobs:
   macos:
     name: macOS
-    runs-on: macos-latest
+    runs-on: macos-15
 
     steps:
       - name: Checkout
@@ -23,6 +23,7 @@ jobs:
         run: |
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 \
             -DCMAKE_PREFIX_PATH="$(brew --prefix qt);$(brew --prefix opencv)"
 
       - name: Build
@@ -30,3 +31,6 @@ jobs:
 
       - name: Test
         run: ctest --test-dir build --output-on-failure
+
+      - name: Check macOS deployment compatibility
+        run: tools/check_macos_compatibility.sh build/softloaf_trichrome_app.app

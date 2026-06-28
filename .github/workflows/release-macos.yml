@@ -1,0 +1,148 @@
+name: Release macOS
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version without the leading v
+        required: true
+        default: 0.1.0-alpha.1
+      create_draft_release:
+        description: Create a GitHub draft release from the notarized DMG
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    name: Package macOS
+    runs-on: macos-15
+
+    env:
+      VCPKG_COMMIT: a0400024711b283056538ac19ced80b91a83c24c
+      VCPKG_ROOT: ${{ github.workspace }}/.vcpkg
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.vcpkg-cache
+      VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/.vcpkg-cache,readwrite
+      APPLE_DEVELOPER_ID_APPLICATION: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+      MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+      KEYCHAIN_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate signing secrets
+        run: |
+          missing=0
+          for name in \
+            APPLE_DEVELOPER_ID_APPLICATION \
+            APPLE_ID \
+            APPLE_TEAM_ID \
+            APPLE_APP_SPECIFIC_PASSWORD \
+            MACOS_CERTIFICATE_P12 \
+            MACOS_CERTIFICATE_PASSWORD; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Missing Actions secret: ${name}"
+              missing=1
+            fi
+          done
+          exit "${missing}"
+
+      - name: Import signing certificate
+        run: |
+          certificate_path="${RUNNER_TEMP}/developer-id-application.p12"
+          keychain_path="${RUNNER_TEMP}/softloaf-release.keychain-db"
+
+          echo "${MACOS_CERTIFICATE_P12}" | base64 --decode > "${certificate_path}"
+          security create-keychain -p "${KEYCHAIN_PASSWORD}" "${keychain_path}"
+          security set-keychain-settings -lut 21600 "${keychain_path}"
+          security unlock-keychain -p "${KEYCHAIN_PASSWORD}" "${keychain_path}"
+          security import "${certificate_path}" \
+            -P "${MACOS_CERTIFICATE_PASSWORD}" \
+            -A \
+            -t cert \
+            -f pkcs12 \
+            -k "${keychain_path}"
+          security list-keychains -d user -s "${keychain_path}"
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s \
+            -k "${KEYCHAIN_PASSWORD}" \
+            "${keychain_path}"
+
+      - name: Install build tools
+        run: |
+          brew update
+          brew install ninja pkg-config
+
+      - name: Restore vcpkg binary cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+          key: macos-15-vcpkg-${{ env.VCPKG_COMMIT }}-${{ hashFiles('vcpkg.json') }}
+          restore-keys: |
+            macos-15-vcpkg-${{ env.VCPKG_COMMIT }}-
+
+      - name: Bootstrap vcpkg
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git "${VCPKG_ROOT}"
+          git -C "${VCPKG_ROOT}" checkout "${VCPKG_COMMIT}"
+          "${VCPKG_ROOT}/bootstrap-vcpkg.sh" -disableMetrics
+          mkdir -p "${VCPKG_DEFAULT_BINARY_CACHE}"
+
+      - name: Configure
+        run: |
+          cmake -S . -B build-release -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 \
+            -DCMAKE_TOOLCHAIN_FILE="${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+
+      - name: Build
+        run: cmake --build build-release
+
+      - name: Test
+        run: ctest --test-dir build-release --output-on-failure
+
+      - name: Package DMG
+        run: |
+          SOFTLOAF_CODESIGN_IDENTITY="${APPLE_DEVELOPER_ID_APPLICATION}" \
+          SOFTLOAF_TRICHROME_VERSION="${{ inputs.version }}" \
+            tools/package_macos_dmg.sh build-release
+
+      - name: Notarize DMG
+        run: |
+          APPLE_ID="${APPLE_ID}" \
+          APPLE_TEAM_ID="${APPLE_TEAM_ID}" \
+          APPLE_APP_SPECIFIC_PASSWORD="${APPLE_APP_SPECIFIC_PASSWORD}" \
+            tools/notarize_macos_dmg.sh "build-release/SoftLoaf-Trichrome-${{ inputs.version }}-macOS.dmg"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SoftLoaf-Trichrome-${{ inputs.version }}-macOS
+          path: |
+            build-release/SoftLoaf-Trichrome-${{ inputs.version }}-macOS.dmg
+            build-release/SoftLoaf-Trichrome-${{ inputs.version }}-macOS.dmg.sha256
+          if-no-files-found: error
+
+      - name: Create draft release
+        if: ${{ inputs.create_draft_release }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="v${{ inputs.version }}"
+          notes="docs/release_notes/${tag}.md"
+          gh release create "${tag}" \
+            "build-release/SoftLoaf-Trichrome-${{ inputs.version }}-macOS.dmg" \
+            "build-release/SoftLoaf-Trichrome-${{ inputs.version }}-macOS.dmg.sha256" \
+            --title "SoftLoaf Trichrome ${tag}" \
+            --notes-file "${notes}" \
+            --draft \
+            --verify-tag
