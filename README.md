@@ -12,10 +12,6 @@
   <a href="https://github.com/Flemyng1999/SoftLoaf-Trichrome/releases">Downloads</a>
   ·
   <a href="docs/release.md">Release Notes</a>
-  ·
-  <a href="docs/architecture.md">Architecture</a>
-  ·
-  <a href="docs/todo.md">Roadmap</a>
 </p>
 
 SoftLoaf Trichrome is a Qt/QML and C++ application for photographers working
@@ -65,9 +61,9 @@ release.
 5. Preview the composed result.
 6. Export a single frame or all complete frames.
 
-The desktop decoder supports the same RAW-oriented import family used by
-SoftLoaf Negative, including `.3fr`, `.dng`, `.arw`, `.cr2`, `.cr3`, `.nef`,
-`.raf`, `.rw2`, `.orf`, `.pef`, and `.srw`, plus TIFF/JPEG/PNG.
+Supported RAW formats include common camera files such as `.3fr`, `.dng`,
+`.arw`, `.cr2`, `.cr3`, `.nef`, `.raf`, `.rw2`, `.orf`, `.pef`, and `.srw`,
+plus TIFF/JPEG/PNG.
 
 ## Build From Source
 
@@ -96,50 +92,8 @@ open build/softloaf_trichrome_app.app
 
 ### Windows
 
-The release workflow builds on `windows-2022` with prebuilt Qt and a trimmed
-vcpkg manifest for OpenCV and LibRaw. See [docs/release.md](docs/release.md)
-for the exact packaging route.
-
-For local Windows development, use the same dependency split:
-
-- Qt from the official Qt/MSVC distribution;
-- OpenCV and LibRaw from vcpkg;
-- CMake + Ninja + MSVC.
-
-## Command Line Checks
-
-The repository also builds a small diagnostic CLI:
-
-```bash
-./build/softloaf_trichrome_check --synthetic-mono-oracle
-./build/softloaf_trichrome_check --folder /path/to/rgb-roll
-./build/softloaf_trichrome_check --file R.raf --file G.raf --file B.raf
-```
-
-The CLI is primarily for smoke tests, grouping diagnostics, and development
-checks. The main user experience is the desktop app.
-
-## Project Notes
-
-- [Architecture](docs/architecture.md) describes cache, logging, display, and
-  task lifecycle boundaries.
-- [Release and packaging](docs/release.md) records the fixed macOS and Windows
-  packaging process.
-- [Roadmap](docs/todo.md) tracks current work.
-
-## Release Policy
-
-Release builds are produced in clean CI environments:
-
-- macOS release builds are pinned to `macos-15` with
-  `CMAKE_OSX_DEPLOYMENT_TARGET=15.0`.
-- Windows release builds are pinned to `windows-2022`.
-- Windows Qt is installed from the official prebuilt Qt distribution.
-- Windows OpenCV/LibRaw dependencies are installed from the release-specific
-  vcpkg manifest at `.github/vcpkg/windows/vcpkg.json`.
-
-Do not publish local macOS DMGs produced from a newer Homebrew environment when
-bundled dependencies report a deployment target newer than macOS 15.0.
+Use Qt for MSVC, OpenCV and LibRaw from vcpkg, plus CMake, Ninja, and MSVC. The
+release packaging route is documented in [docs/release.md](docs/release.md).
 
 ## License
 
@@ -158,13 +112,3 @@ use requires a separate commercial agreement; see
 
 Third-party dependency notes are in
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-
-## Test Data
-
-Public RAW fixtures should not be committed to this repository. Keep fixture
-manifests and checksums in git, and cache downloaded raw.pixls.us files locally
-under:
-
-```text
-/Users/flemyng/Desktop/Film/raw.pixls.us/
-```
