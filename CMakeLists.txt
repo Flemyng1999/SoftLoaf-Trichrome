@@ -35,10 +35,17 @@ if(SOFTLOAF_TRICHROME_BUILD_APP)
         set(SOFTLOAF_TRICHROME_NATIVE_OPEN_PANEL
             src/native_open_panel.mm
             src/native_open_panel.hpp)
+        set(SOFTLOAF_TRICHROME_PLATFORM_RESOURCES
+            resources/AppIcon.icns)
     else()
         set(SOFTLOAF_TRICHROME_NATIVE_OPEN_PANEL
             src/native_open_panel_stub.cpp
             src/native_open_panel.hpp)
+        set(SOFTLOAF_TRICHROME_PLATFORM_RESOURCES)
+        if(WIN32)
+            set(SOFTLOAF_TRICHROME_PLATFORM_RESOURCES
+                resources/windows_app_icon.rc)
+        endif()
     endif()
 
     qt_add_executable(softloaf_trichrome_app
@@ -53,12 +60,21 @@ if(SOFTLOAF_TRICHROME_BUILD_APP)
         src/trichrome_controller.cpp
         src/trichrome_controller.hpp
         src/trichrome_image_provider.cpp
-        src/trichrome_image_provider.hpp)
+        src/trichrome_image_provider.hpp
+        ${SOFTLOAF_TRICHROME_PLATFORM_RESOURCES})
+
+    if(APPLE)
+        set_source_files_properties(resources/AppIcon.icns
+            PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
+    endif()
 
     set_target_properties(softloaf_trichrome_app PROPERTIES
         MACOSX_BUNDLE TRUE
         MACOSX_BUNDLE_BUNDLE_NAME "SoftLoaf Trichrome"
-        MACOSX_BUNDLE_GUI_IDENTIFIER "art.revela.softloaf-trichrome")
+        MACOSX_BUNDLE_GUI_IDENTIFIER "art.revela.softloaf-trichrome"
+        MACOSX_BUNDLE_ICON_FILE "AppIcon.icns"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+        MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}")
 
     if(APPLE)
         set_source_files_properties(src/native_open_panel.mm
