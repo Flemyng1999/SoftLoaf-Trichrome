@@ -23,7 +23,7 @@ jobs:
 
     env:
       VCPKG_COMMIT: a0400024711b283056538ac19ced80b91a83c24c
-      VCPKG_ROOT: ${{ github.workspace }}\.vcpkg
+      SOFTLOAF_VCPKG_ROOT: ${{ github.workspace }}\.vcpkg
       VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}\.vcpkg-cache
       VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}\.vcpkg-cache,readwrite
       WINDOWS_CODESIGN_PFX: ${{ secrets.WINDOWS_CODESIGN_PFX }}
@@ -54,16 +54,16 @@ jobs:
       - name: Bootstrap vcpkg
         shell: pwsh
         run: |
-          git clone https://github.com/microsoft/vcpkg.git "$env:VCPKG_ROOT"
-          git -C "$env:VCPKG_ROOT" checkout "$env:VCPKG_COMMIT"
-          & "$env:VCPKG_ROOT\bootstrap-vcpkg.bat" -disableMetrics
+          git clone https://github.com/microsoft/vcpkg.git "$env:SOFTLOAF_VCPKG_ROOT"
+          git -C "$env:SOFTLOAF_VCPKG_ROOT" checkout "$env:VCPKG_COMMIT"
+          & "$env:SOFTLOAF_VCPKG_ROOT\bootstrap-vcpkg.bat" -disableMetrics
           New-Item -ItemType Directory -Force -Path "$env:VCPKG_DEFAULT_BINARY_CACHE" | Out-Null
 
       - name: Install vcpkg dependencies
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path build-windows | Out-Null
-          & "$env:VCPKG_ROOT\vcpkg.exe" install `
+          & "$env:SOFTLOAF_VCPKG_ROOT\vcpkg.exe" install `
             --triplet x64-windows `
             --x-manifest-root="$env:GITHUB_WORKSPACE" `
             --x-install-root="$env:GITHUB_WORKSPACE\build-windows\vcpkg_installed"
@@ -73,7 +73,7 @@ jobs:
         run: |
           cmake -S . -B build-windows -G Ninja `
             -DCMAKE_BUILD_TYPE=Release `
-            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake" `
+            -DCMAKE_TOOLCHAIN_FILE="$env:SOFTLOAF_VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake" `
             -DVCPKG_TARGET_TRIPLET=x64-windows `
             -DVCPKG_INSTALLED_DIR="$env:GITHUB_WORKSPACE\build-windows\vcpkg_installed"
 
