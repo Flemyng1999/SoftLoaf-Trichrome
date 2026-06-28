@@ -1,29 +1,43 @@
 # SoftLoaf Trichrome
 
-Standalone C++20 extraction of SoftLoaf Negative's trichrome import core.
+Standalone Qt/QML + C++ desktop app for composing trichrome photo batches into
+finished RGB frames.
 
-This repository intentionally starts as a small, Qt-free library:
+The core workflow is:
+
+- choose files or a folder;
+- group photos three at a time as R/G/B captures;
+- choose monochrome or Bayer source mode;
+- preview the composed frame;
+- export PNG/TIFF/JPEG.
+
+The C++ core also remains usable as a small library and CLI test target:
 
 - trichrome file grouping and stable JSON import reports;
 - project/input model structs needed by trichrome artifacts;
 - artifact identity and stale/missing/dirty guards;
 - structure correlation diagnostics;
 - mono/Bayer role composition into RGB;
-- atomic RGB16 NPY artifact writing;
-- a tiny CLI smoke checker and CTest target.
+- atomic RGB16 NPY artifact writing.
 
-The desktop app integration, licensing gates, QML, ProjectController worker
-coordination, RAW decode backend, and DCP profile lookup remain in
-SoftLoaf-Negative for now. Those should be wired back through this library in a
-separate integration stage.
+The desktop decoder supports the same import extension family as SoftLoaf
+Negative: common RAW formats (`.3fr`, `.dng`, `.arw`, `.cr2`, `.cr3`, `.nef`,
+`.raf`, `.rw2`, `.orf`, `.pef`, `.srw`, etc.) via LibRaw, plus TIFF/JPEG/PNG via
+OpenCV.
 
 ## Build
 
 ```bash
 cmake -S . -B build -G Ninja \
-  -DCMAKE_PREFIX_PATH="$(brew --prefix opencv)"
+  -DCMAKE_PREFIX_PATH="$(brew --prefix qt);$(brew --prefix opencv)"
 cmake --build build
 ctest --test-dir build --output-on-failure
+```
+
+## Run The Desktop App
+
+```bash
+open build/softloaf_trichrome_app.app
 ```
 
 ## CLI

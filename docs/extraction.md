@@ -1,7 +1,8 @@
 # Extraction Notes
 
-This is the first standalone extraction of the trichrome module from
-SoftLoaf-Negative.
+This repository started as a standalone extraction of the trichrome module from
+SoftLoaf-Negative and now includes a focused Qt/QML desktop app around that
+core.
 
 ## Included
 
@@ -13,13 +14,16 @@ SoftLoaf-Negative.
 - Structure correlation diagnostics.
 - Mono and Bayer role composition through caller-supplied decoders.
 - Atomic RGB16 NPY artifact writing.
+- Qt/QML desktop shell for import, grouping, preview, and export.
+- LibRaw/OpenCV desktop decoder for the same import extension family as the
+  parent app.
 - Smoke CLI and CTest target.
 
 ## Not Included Yet
 
-- Qt/QML and `ProjectController` integration.
+- Parent app `ProjectController` integration.
 - Licensing gates.
-- LibRaw decode and DCP/profile lookup.
+- DCP/profile lookup.
 - SoftLoaf project JSON persistence.
 - Full historical test suite from the parent repository.
 

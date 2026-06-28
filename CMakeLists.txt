@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.22)
 
 project(SoftLoafTrichrome
     VERSION 0.1.0
-    DESCRIPTION "Standalone SoftLoaf trichrome import and artifact core"
+    DESCRIPTION "Standalone SoftLoaf trichrome desktop app and core"
     LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -11,14 +11,51 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(SOFTLOAF_TRICHROME_BUILD_TOOLS "Build command line tools" ON)
 option(SOFTLOAF_TRICHROME_BUILD_TESTS "Build smoke tests" ON)
+option(SOFTLOAF_TRICHROME_BUILD_APP "Build Qt desktop app" ON)
 
-find_package(OpenCV REQUIRED COMPONENTS core imgproc)
+find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(LIBRAW REQUIRED IMPORTED_TARGET libraw)
 
 add_library(softloaf_trichrome INTERFACE)
 target_include_directories(softloaf_trichrome INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>)
 target_link_libraries(softloaf_trichrome INTERFACE ${OpenCV_LIBS})
+
+if(SOFTLOAF_TRICHROME_BUILD_APP)
+    find_package(Qt6 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2 Widgets)
+    qt_standard_project_setup(REQUIRES 6.6)
+    qt_policy(SET QTP0004 NEW)
+
+    qt_add_executable(softloaf_trichrome_app
+        src/main.cpp
+        src/desktop_decoder.cpp
+        src/desktop_decoder.hpp
+        src/trichrome_controller.cpp
+        src/trichrome_controller.hpp)
+
+    set_target_properties(softloaf_trichrome_app PROPERTIES
+        MACOSX_BUNDLE TRUE
+        MACOSX_BUNDLE_BUNDLE_NAME "SoftLoaf Trichrome"
+        MACOSX_BUNDLE_GUI_IDENTIFIER "art.revela.softloaf-trichrome")
+
+    qt_add_qml_module(softloaf_trichrome_app
+        URI SoftLoafTrichrome
+        VERSION 1.0
+        QML_FILES
+            qml/Main.qml)
+
+    target_link_libraries(softloaf_trichrome_app PRIVATE
+        softloaf_trichrome
+        PkgConfig::LIBRAW
+        Qt6::Core
+        Qt6::Gui
+        Qt6::Qml
+        Qt6::Quick
+        Qt6::QuickControls2
+        Qt6::Widgets)
+endif()
 
 if(SOFTLOAF_TRICHROME_BUILD_TOOLS)
     add_executable(softloaf_trichrome_check tools/softloaf_trichrome_check.cpp)
