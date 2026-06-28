@@ -176,6 +176,26 @@ gh release create v0.1.0-alpha.1 \
 
 Inspect the draft in GitHub before publishing it.
 
+Release publication checklist:
+
+1. create or verify the annotated tag, for example `v0.1.0-alpha.1`;
+2. create the GitHub Release as `--draft --prerelease`;
+3. run the macOS release workflow with draft creation enabled, or upload to the
+   existing draft;
+4. run the Windows release workflow with `upload_to_release=true`;
+5. update the draft notes from `docs/release_notes/<tag>.md` after all assets
+   are uploaded;
+6. verify the asset list, checksums, draft flag, and prerelease flag with:
+
+```bash
+gh release view v0.1.0-alpha.1 \
+  --json tagName,name,url,isDraft,isPrerelease,assets
+```
+
+Do not publish the GitHub Release until both platform workflows have completed
+successfully and the release notes describe the exact platform support and
+signing state.
+
 ## Windows EXE
 
 The most convenient user-facing Windows package is a zip or installer containing
@@ -207,16 +227,81 @@ Recommended path:
 Windows packaging is handled by `.github/workflows/release-windows.yml` and
 `tools/package_windows.ps1`. The workflow:
 
-1. configures and builds Release on `windows-2022` with vcpkg;
-2. run CTest;
-3. run `windeployqt`;
-4. copy OpenCV/LibRaw runtime DLLs;
-5. optionally sign binaries with `signtool` when `WINDOWS_CODESIGN_PFX` and
+1. runs on `windows-2022`;
+2. installs pinned prebuilt Qt with `jurplel/install-qt-action`;
+3. installs OpenCV/LibRaw with the Windows-only vcpkg manifest at
+   `.github/vcpkg/windows/vcpkg.json`;
+4. configures and builds Release with Ninja and MSVC;
+5. runs CTest;
+6. runs `windeployqt`;
+7. copies OpenCV/LibRaw runtime DLLs;
+8. optionally signs binaries with `signtool` when `WINDOWS_CODESIGN_PFX` and
    `WINDOWS_CODESIGN_PASSWORD` are configured;
-6. create a portable zip and NSIS installer;
-7. optionally sign the installer;
-8. emit SHA256 checksums;
-9. optionally upload the assets to the existing GitHub release draft.
+9. creates a portable zip and NSIS installer;
+10. optionally signs the installer;
+11. emits SHA256 checksums;
+12. optionally uploads the assets to the existing GitHub release draft.
+
+Run Windows packaging from GitHub Actions, not a local developer shell:
+
+```bash
+gh workflow run "Release Windows" \
+  -f version=0.1.0-alpha.1 \
+  -f upload_to_release=true
+```
+
+Expected Windows release assets:
+
+```text
+SoftLoaf-Trichrome-<version>-Windows-x64-Setup.exe
+SoftLoaf-Trichrome-<version>-Windows-x64-portable.zip
+SoftLoaf-Trichrome-<version>-Windows-x64.sha256
+```
+
+After the run completes, verify both the workflow and the release draft:
+
+```bash
+gh run list --workflow "Release Windows" --limit 5
+gh release view v0.1.0-alpha.1 --json isDraft,isPrerelease,assets
+```
+
+For `v0.1.0-alpha.1`, the successful Windows run was `28321855649`. The
+important fixed decisions from that run are:
+
+- use prebuilt Qt from `jurplel/install-qt-action`; do not build Qt through
+  vcpkg for release packaging;
+- use `.github/vcpkg/windows/vcpkg.json` for release dependencies; do not use
+  the repository root `vcpkg.json` for the Windows release workflow;
+- keep OpenCV default features disabled in the Windows release manifest;
+- keep CMake in `VCPKG_MANIFEST_MODE=OFF` after the dependency install so it
+  consumes the already-installed vcpkg tree and the prebuilt Qt prefix;
+- set `VCPKG_ROOT` back to `SOFTLOAF_VCPKG_ROOT` after `ilammy/msvc-dev-cmd`;
+  that action can expose Visual Studio's bundled vcpkg path;
+- keep `windeployqt` discovery flexible: first `QT_ROOT_DIR`, then vcpkg
+  `tools\Qt6\bin`, then `PATH`;
+- write PowerShell `Join-Path` calls in scripts with explicit `-Path` and
+  `-ChildPath` arguments when building arrays of paths;
+- make Windows-specific C++ code compile on MSVC; POSIX-only headers such as
+  `dlfcn.h` must be behind platform guards.
+
+Known pitfalls from the first Windows packaging pass:
+
+- `macos-latest` and local Homebrew builds are not a release environment for
+  macOS 15+ artifacts.
+- `macos-15` and `windows-2022` are intentionally pinned; do not replace them
+  with `*-latest` in release workflows.
+- vcpkg automatically enters manifest mode when it sees the root `vcpkg.json`;
+  passing individual packages in that mode fails. Use a dedicated manifest or
+  `--classic` deliberately.
+- OpenCV default features pull in large modules such as DNN, GAPI, highgui, and
+  platform UI/video backends. The app only requires `core`, `imgproc`, and
+  `imgcodecs`; the release manifest must stay trimmed.
+- GitHub `actions/cache` saves at job success. If a job fails after vcpkg
+  installation, the cache may not be saved. A later successful run is the
+  baseline cache warmer.
+- An unsigned Windows alpha installer is expected to trigger SmartScreen.
+  Do not describe it as a trusted general-public installer until Authenticode
+  signing is configured.
 
 Microsoft SignTool requires explicit digest parameters on modern signing
 commands:
