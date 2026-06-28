@@ -30,6 +30,9 @@ jobs:
       APPLE_ID: ${{ secrets.APPLE_ID }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+      APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+      APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
       MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
       MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
       KEYCHAIN_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}
@@ -43,9 +46,6 @@ jobs:
           missing=0
           for name in \
             APPLE_DEVELOPER_ID_APPLICATION \
-            APPLE_ID \
-            APPLE_TEAM_ID \
-            APPLE_APP_SPECIFIC_PASSWORD \
             MACOS_CERTIFICATE_P12 \
             MACOS_CERTIFICATE_PASSWORD; do
             if [[ -z "${!name}" ]]; then
@@ -53,6 +53,21 @@ jobs:
               missing=1
             fi
           done
+          if [[ -n "${APPLE_API_KEY_ID}" || -n "${APPLE_API_KEY}" || -n "${APPLE_API_ISSUER_ID}" ]]; then
+            for name in APPLE_API_KEY_ID APPLE_API_KEY; do
+              if [[ -z "${!name}" ]]; then
+                echo "::error::Missing Actions secret: ${name}"
+                missing=1
+              fi
+            done
+          else
+            for name in APPLE_ID APPLE_TEAM_ID APPLE_APP_SPECIFIC_PASSWORD; do
+              if [[ -z "${!name}" ]]; then
+                echo "::error::Missing Actions secret: ${name}"
+                missing=1
+              fi
+            done
+          fi
           exit "${missing}"
 
       - name: Import signing certificate
@@ -121,6 +136,9 @@ jobs:
           APPLE_ID="${APPLE_ID}" \
           APPLE_TEAM_ID="${APPLE_TEAM_ID}" \
           APPLE_APP_SPECIFIC_PASSWORD="${APPLE_APP_SPECIFIC_PASSWORD}" \
+          APPLE_API_KEY_ID="${APPLE_API_KEY_ID}" \
+          APPLE_API_ISSUER_ID="${APPLE_API_ISSUER_ID}" \
+          APPLE_API_KEY="${APPLE_API_KEY}" \
             tools/notarize_macos_dmg.sh "build-release/SoftLoaf-Trichrome-${{ inputs.version }}-macOS.dmg"
 
       - name: Upload artifact

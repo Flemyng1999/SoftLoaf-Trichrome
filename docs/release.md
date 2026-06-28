@@ -139,6 +139,18 @@ Application `.p12` export. `APPLE_DEVELOPER_ID_APPLICATION` should be the exact
 codesigning identity, for example
 `Developer ID Application: Your Name (TEAMID)`.
 
+For notarization, configure either Apple ID credentials:
+
+- `APPLE_ID`
+- `APPLE_TEAM_ID`
+- `APPLE_APP_SPECIFIC_PASSWORD`
+
+or App Store Connect API key credentials:
+
+- `APPLE_API_KEY_ID`
+- `APPLE_API_KEY`
+- `APPLE_API_ISSUER_ID` for Team API Keys only
+
 ## GitHub Release
 
 Release notes live under `docs/release_notes/`.
