@@ -1,13 +1,26 @@
 #include "trichrome_controller.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <array>
+#include <cmath>
+#include <cstdint>
+#include <filesystem>
+#include <memory>
 #include <string>
+#if defined(__APPLE__)
+#include <sys/sysctl.h>
+#include <sys/types.h>
+#elif defined(__linux__)
+#include <sys/sysinfo.h>
+#endif
 
 #include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QColorSpace>
 #include <QImage>
+#include <QImageWriter>
 #include <QMetaObject>
 #include <QPointer>
 #include <QThread>
@@ -15,14 +28,20 @@
 #include <opencv2/imgproc.hpp>
 
 #include "desktop_decoder.hpp"
+#include "native_open_panel.hpp"
 #include "obs_log.hpp"
-#include "project_store.hpp"
 #include "softloaf_trichrome/composer.hpp"
+#include "softloaf_trichrome/raw_metadata.hpp"
 #include "trichrome_cache.hpp"
 #include "trichrome_image_provider.hpp"
 
 namespace softloaf::trichrome::desktop {
 namespace {
+
+constexpr int kPreviewCacheMaxEdge = 2048;
+constexpr int kBackgroundFrameConcurrencyCap = 4;
+constexpr const char* kDisplayColorSpace = "srgb";
+constexpr uint64_t kGiB = 1024ull * 1024ull * 1024ull;
 
 QString BaseName(const std::filesystem::path& path) {
     return QString::fromStdString(path.filename().string());
@@ -38,17 +57,50 @@ QString RoleName(QChar c) {
     return "blue";
 }
 
-QImage ImageBufToQImage(const ImageBuf& image) {
-    if (image.empty() || image.data.depth() != CV_32F || image.data.channels() != 3)
-        return {};
-    cv::Mat clamped;
-    cv::min(image.data, 1.0, clamped);
-    cv::max(clamped, 0.0, clamped);
-    cv::Mat rgb8;
-    clamped.convertTo(rgb8, CV_8UC3, 255.0);
-    QImage q(rgb8.data, rgb8.cols, rgb8.rows, static_cast<int>(rgb8.step),
-             QImage::Format_RGB888);
-    return q.copy();
+bool PathExists(const std::filesystem::path& path) {
+    std::error_code ec;
+    return std::filesystem::is_regular_file(path, ec);
+}
+
+int LogicalCpuCount() {
+    return std::max(1, QThread::idealThreadCount());
+}
+
+uint64_t PhysicalMemoryBytes() {
+#if defined(__APPLE__)
+    uint64_t mem = 0;
+    size_t len = sizeof(mem);
+    if (sysctlbyname("hw.memsize", &mem, &len, nullptr, 0) == 0) return mem;
+#elif defined(__linux__)
+    struct sysinfo info {};
+    if (sysinfo(&info) == 0)
+        return static_cast<uint64_t>(info.totalram) * static_cast<uint64_t>(info.mem_unit);
+#endif
+    return 0;
+}
+
+int CpuBoundFrameConcurrency(int logical_cpus) {
+    if (logical_cpus < 6) return 1;
+    if (logical_cpus < 12) return 2;
+    if (logical_cpus < 16) return 3;
+    return kBackgroundFrameConcurrencyCap;
+}
+
+int MemoryBoundFrameConcurrency(uint64_t physical_memory) {
+    if (physical_memory == 0) return 2;
+    if (physical_memory < 12ull * kGiB) return 1;
+    if (physical_memory < 24ull * kGiB) return 2;
+    if (physical_memory < 48ull * kGiB) return 3;
+    return kBackgroundFrameConcurrencyCap;
+}
+
+int BackgroundFrameConcurrency(int frame_count) {
+    const int logical_cpus = LogicalCpuCount();
+    const uint64_t physical_memory = PhysicalMemoryBytes();
+    const int cpu_bound = CpuBoundFrameConcurrency(logical_cpus);
+    const int memory_bound = MemoryBoundFrameConcurrency(physical_memory);
+    return std::clamp(std::min({cpu_bound, memory_bound, frame_count}),
+                      1, kBackgroundFrameConcurrencyCap);
 }
 
 struct ComposeTaskResult {
@@ -68,8 +120,341 @@ struct ExportTaskResult {
     QString status;
 };
 
+struct XyPrimary {
+    double x = 0.0;
+    double y = 0.0;
+};
+
+using Mat3d = std::array<double, 9>;
+
+QString NormalizeExportFormat(QString format) {
+    format = format.trimmed().toLower();
+    if (format == "jpg") return "jpeg";
+    if (format == "tif") return "tiff";
+    if (format == "png" || format == "jpeg" || format == "tiff") return format;
+    return "tiff";
+}
+
+QString NormalizeExportColorSpace(QString color_space) {
+    color_space = color_space.trimmed().toLower();
+    color_space.replace("-", "_");
+    color_space.replace(" ", "_");
+    if (color_space == "aces_ap0" || color_space == "ap0" ||
+        color_space == "aces2065_1" || color_space == "aces_2065_1") {
+        return "aces_ap0_linear";
+    }
+    if (color_space == "acescg" || color_space == "ap1" ||
+        color_space == "aces_ap1") {
+        return "acescg_linear";
+    }
+    if (color_space == "prophoto" || color_space == "prophoto_rgb" ||
+        color_space == "romm_rgb") {
+        return "prophoto_linear";
+    }
+    if (color_space == "rec2020" || color_space == "bt2020" ||
+        color_space == "bt_2020") {
+        return "rec_2020_linear";
+    }
+    if (color_space == "displayp3") return "display_p3";
+    if (color_space == "p3") return "display_p3";
+    if (color_space == "p3_d65_gamma_26") return "p3_d65_gamma_2_6";
+    if (color_space == "rec709") return "rec_709";
+    if (color_space == "adobergb") return "adobe_rgb";
+    if (color_space == "srgb" || color_space == "aces_ap0_linear" ||
+        color_space == "acescg_linear" || color_space == "prophoto_linear" ||
+        color_space == "rec_2020_linear" || color_space == "display_p3" ||
+        color_space == "p3_d65_gamma_2_6" || color_space == "rec_709" ||
+        color_space == "adobe_rgb") {
+        return color_space;
+    }
+    return "aces_ap0_linear";
+}
+
+int NormalizeExportBitDepth(const QString& format, int bit_depth) {
+    if (format == "jpeg") return 8;
+    return bit_depth >= 16 ? 16 : 8;
+}
+
+QByteArray ExportFormatName(const QString& format) {
+    if (format == "png") return QByteArrayLiteral("png");
+    if (format == "jpeg") return QByteArrayLiteral("jpeg");
+    return QByteArrayLiteral("tiff");
+}
+
+QString ExportExtension(const QString& format) {
+    if (format == "png") return "png";
+    if (format == "jpeg") return "jpg";
+    return "tiff";
+}
+
+QString ExportColorSpaceLabel(const QString& color_space) {
+    if (color_space == "aces_ap0_linear") return "ACES AP0 Linear";
+    if (color_space == "acescg_linear") return "ACEScg AP1 Linear";
+    if (color_space == "prophoto_linear") return "ProPhoto RGB Linear";
+    if (color_space == "rec_2020_linear") return "Rec.2020 Linear";
+    if (color_space == "display_p3") return "Display P3";
+    if (color_space == "p3_d65_gamma_2_6") return "P3-D65 Gamma 2.6";
+    if (color_space == "rec_709") return "Rec.709 Gamma 2.4";
+    if (color_space == "adobe_rgb") return "Adobe RGB";
+    return "sRGB";
+}
+
+QImage::Format ExportImageFormat(int bit_depth) {
+    return bit_depth >= 16 ? QImage::Format_RGBX64 : QImage::Format_RGB888;
+}
+
+QColorSpace ExportColorSpace(const QString& color_space) {
+    if (color_space == "prophoto_linear") {
+        QColorSpace space(QColorSpace::Primaries::ProPhotoRgb,
+                          QColorSpace::TransferFunction::Linear);
+        space.setDescription(QStringLiteral("ProPhoto RGB Linear"));
+        return space;
+    }
+    if (color_space == "rec_2020_linear") {
+        QColorSpace space(QColorSpace::Primaries::Bt2020,
+                          QColorSpace::TransferFunction::Linear);
+        space.setDescription(QStringLiteral("Rec.2020 Linear"));
+        return space;
+    }
+    if (color_space == "display_p3") return QColorSpace(QColorSpace::DisplayP3);
+    if (color_space == "p3_d65_gamma_2_6") {
+        QColorSpace space(QColorSpace::Primaries::DciP3D65,
+                          QColorSpace::TransferFunction::Gamma, 2.6f);
+        space.setDescription(QStringLiteral("P3-D65 Gamma 2.6"));
+        return space;
+    }
+    if (color_space == "rec_709") {
+        QColorSpace space(QColorSpace::Primaries::SRgb,
+                          QColorSpace::TransferFunction::Gamma, 2.4f);
+        space.setDescription(QStringLiteral("Rec.709 Gamma 2.4"));
+        return space;
+    }
+    if (color_space == "adobe_rgb") return QColorSpace(QColorSpace::AdobeRgb);
+    return QColorSpace(QColorSpace::SRgb);
+}
+
+std::array<double, 3> XyzFromXy(XyPrimary p) {
+    if (std::abs(p.y) < 1e-12) return {0.0, 0.0, 0.0};
+    return {p.x / p.y, 1.0, (1.0 - p.x - p.y) / p.y};
+}
+
+Mat3d Mul(const Mat3d& a, const Mat3d& b) {
+    Mat3d out = {};
+    for (int r = 0; r < 3; ++r) {
+        for (int c = 0; c < 3; ++c) {
+            for (int k = 0; k < 3; ++k)
+                out[static_cast<size_t>(r * 3 + c)] +=
+                    a[static_cast<size_t>(r * 3 + k)] *
+                    b[static_cast<size_t>(k * 3 + c)];
+        }
+    }
+    return out;
+}
+
+std::array<double, 3> Mul(const Mat3d& m, const std::array<double, 3>& v) {
+    return {
+        m[0] * v[0] + m[1] * v[1] + m[2] * v[2],
+        m[3] * v[0] + m[4] * v[1] + m[5] * v[2],
+        m[6] * v[0] + m[7] * v[1] + m[8] * v[2],
+    };
+}
+
+Mat3d Invert(const Mat3d& m) {
+    const double det =
+        m[0] * (m[4] * m[8] - m[5] * m[7]) -
+        m[1] * (m[3] * m[8] - m[5] * m[6]) +
+        m[2] * (m[3] * m[7] - m[4] * m[6]);
+    if (std::abs(det) < 1e-12) return {};
+    const double inv_det = 1.0 / det;
+    return {
+        (m[4] * m[8] - m[5] * m[7]) * inv_det,
+        (m[2] * m[7] - m[1] * m[8]) * inv_det,
+        (m[1] * m[5] - m[2] * m[4]) * inv_det,
+        (m[5] * m[6] - m[3] * m[8]) * inv_det,
+        (m[0] * m[8] - m[2] * m[6]) * inv_det,
+        (m[2] * m[3] - m[0] * m[5]) * inv_det,
+        (m[3] * m[7] - m[4] * m[6]) * inv_det,
+        (m[1] * m[6] - m[0] * m[7]) * inv_det,
+        (m[0] * m[4] - m[1] * m[3]) * inv_det,
+    };
+}
+
+Mat3d RgbToXyzMatrix(XyPrimary white, XyPrimary red,
+                     XyPrimary green, XyPrimary blue) {
+    const auto r = XyzFromXy(red);
+    const auto g = XyzFromXy(green);
+    const auto b = XyzFromXy(blue);
+    const auto w = XyzFromXy(white);
+    const Mat3d primaries = {
+        r[0], g[0], b[0],
+        r[1], g[1], b[1],
+        r[2], g[2], b[2],
+    };
+    const std::array<double, 3> scale = Mul(Invert(primaries), w);
+    return {
+        r[0] * scale[0], g[0] * scale[1], b[0] * scale[2],
+        r[1] * scale[0], g[1] * scale[1], b[1] * scale[2],
+        r[2] * scale[0], g[2] * scale[1], b[2] * scale[2],
+    };
+}
+
+Mat3d BradfordAdaptation(XyPrimary src_white, XyPrimary dst_white) {
+    constexpr Mat3d kBradford = {
+         0.8951000,  0.2664000, -0.1614000,
+        -0.7502000,  1.7135000,  0.0367000,
+         0.0389000, -0.0685000,  1.0296000,
+    };
+    constexpr Mat3d kBradfordInv = {
+         0.9869929, -0.1470543,  0.1599627,
+         0.4323053,  0.5183603,  0.0492912,
+        -0.0085287,  0.0400428,  0.9684867,
+    };
+    const auto src_cone = Mul(kBradford, XyzFromXy(src_white));
+    const auto dst_cone = Mul(kBradford, XyzFromXy(dst_white));
+    const Mat3d scale = {
+        dst_cone[0] / src_cone[0], 0.0, 0.0,
+        0.0, dst_cone[1] / src_cone[1], 0.0,
+        0.0, 0.0, dst_cone[2] / src_cone[2],
+    };
+    return Mul(kBradfordInv, Mul(scale, kBradford));
+}
+
+Mat3d LinearSrgbToAcesMatrix(const QString& color_space) {
+    constexpr XyPrimary kD65{0.3127, 0.3290};
+    constexpr XyPrimary kD60{0.32168, 0.33767};
+    constexpr XyPrimary kSrgbRed{0.6400, 0.3300};
+    constexpr XyPrimary kSrgbGreen{0.3000, 0.6000};
+    constexpr XyPrimary kSrgbBlue{0.1500, 0.0600};
+    const Mat3d srgb_to_xyz =
+        RgbToXyzMatrix(kD65, kSrgbRed, kSrgbGreen, kSrgbBlue);
+    const Mat3d d65_to_d60 = BradfordAdaptation(kD65, kD60);
+    if (color_space == "acescg_linear") {
+        constexpr XyPrimary kAp1Red{0.7130, 0.2930};
+        constexpr XyPrimary kAp1Green{0.1650, 0.8300};
+        constexpr XyPrimary kAp1Blue{0.1280, 0.0440};
+        return Mul(Invert(RgbToXyzMatrix(kD60, kAp1Red, kAp1Green, kAp1Blue)),
+                   Mul(d65_to_d60, srgb_to_xyz));
+    }
+    constexpr XyPrimary kAp0Red{0.73470, 0.26530};
+    constexpr XyPrimary kAp0Green{0.00000, 1.00000};
+    constexpr XyPrimary kAp0Blue{0.00010, -0.07700};
+    return Mul(Invert(RgbToXyzMatrix(kD60, kAp0Red, kAp0Green, kAp0Blue)),
+               Mul(d65_to_d60, srgb_to_xyz));
+}
+
+bool UsesManualLinearAcesTransform(const QString& color_space) {
+    return color_space == "aces_ap0_linear" || color_space == "acescg_linear";
+}
+
+bool ExportCanEmbedIcc(const QString& color_space) {
+    return !UsesManualLinearAcesTransform(color_space);
+}
+
+QString ExportEncodingLabel(const TrichromeController::ExportSettings& settings) {
+    return QString("%1, %2-bit, %3")
+        .arg(ExportColorSpaceLabel(settings.color_space))
+        .arg(settings.bit_depth)
+        .arg(ExportCanEmbedIcc(settings.color_space)
+                 ? QStringLiteral("ICC embedded")
+                 : QStringLiteral("no ICC profile"));
+}
+
+quint16 Quantize16(double value) {
+    return static_cast<quint16>(
+        std::lround(std::clamp(value, 0.0, 1.0) * 65535.0));
+}
+
+uchar Quantize8(double value) {
+    return static_cast<uchar>(
+        std::lround(std::clamp(value, 0.0, 1.0) * 255.0));
+}
+
+QImage LinearRgbToManualAcesQImage(const ImageBuf& image,
+                                   const QString& color_space,
+                                   int bit_depth) {
+    const QImage::Format format = ExportImageFormat(bit_depth);
+    QImage out(image.width(), image.height(), format);
+    const Mat3d transform = LinearSrgbToAcesMatrix(color_space);
+    for (int y = 0; y < image.height(); ++y) {
+        const auto* src = image.data.ptr<cv::Vec3f>(y);
+        if (format == QImage::Format_RGBX64) {
+            auto* dst = reinterpret_cast<quint16*>(out.scanLine(y));
+            for (int x = 0; x < image.width(); ++x) {
+                const std::array<double, 3> rgb = {
+                    src[x][0], src[x][1], src[x][2],
+                };
+                const auto encoded = Mul(transform, rgb);
+                dst[4 * x + 0] = Quantize16(encoded[0]);
+                dst[4 * x + 1] = Quantize16(encoded[1]);
+                dst[4 * x + 2] = Quantize16(encoded[2]);
+                dst[4 * x + 3] = 0xffff;
+            }
+        } else {
+            auto* dst = out.scanLine(y);
+            for (int x = 0; x < image.width(); ++x) {
+                const std::array<double, 3> rgb = {
+                    src[x][0], src[x][1], src[x][2],
+                };
+                const auto encoded = Mul(transform, rgb);
+                dst[3 * x + 0] = Quantize8(encoded[0]);
+                dst[3 * x + 1] = Quantize8(encoded[1]);
+                dst[3 * x + 2] = Quantize8(encoded[2]);
+            }
+        }
+    }
+    return out;
+}
+
+QImage LinearRgbToQImage(const ImageBuf& image,
+                         const QString& color_space,
+                         int bit_depth) {
+    if (image.empty() || image.data.depth() != CV_32F || image.data.channels() != 3)
+        return {};
+    if (UsesManualLinearAcesTransform(color_space))
+        return LinearRgbToManualAcesQImage(image, color_space, bit_depth);
+
+    const QColorSpace target_space = ExportColorSpace(color_space);
+    QColorSpace target = target_space;
+    if (!target.isValidTarget()) target = QColorSpace(QColorSpace::SRgb);
+
+    QImage linear(image.width(), image.height(), QImage::Format_RGBX64);
+    for (int y = 0; y < image.height(); ++y) {
+        const auto* src = image.data.ptr<cv::Vec3f>(y);
+        auto* dst = reinterpret_cast<quint16*>(linear.scanLine(y));
+        for (int x = 0; x < image.width(); ++x) {
+            dst[4 * x + 0] = static_cast<quint16>(
+                std::lround(std::clamp(src[x][0], 0.0f, 1.0f) * 65535.0f));
+            dst[4 * x + 1] = static_cast<quint16>(
+                std::lround(std::clamp(src[x][1], 0.0f, 1.0f) * 65535.0f));
+            dst[4 * x + 2] = static_cast<quint16>(
+                std::lround(std::clamp(src[x][2], 0.0f, 1.0f) * 65535.0f));
+            dst[4 * x + 3] = 0xffff;
+        }
+    }
+    linear.setColorSpace(QColorSpace(QColorSpace::SRgbLinear));
+    return linear.convertedToColorSpace(target, ExportImageFormat(bit_depth), Qt::AutoColor);
+}
+
+bool WriteExportImage(QImage image,
+                      const QString& path,
+                      const TrichromeController::ExportSettings& settings,
+                      QString* reason) {
+    QImageWriter writer(path, ExportFormatName(settings.format));
+    if (settings.format == "jpeg")
+        writer.setQuality(std::clamp(settings.jpeg_quality, 1, 100));
+    if (settings.format == "png")
+        writer.setCompression(1);
+    if (!writer.write(image)) {
+        if (reason) *reason = writer.errorString();
+        return false;
+    }
+    if (reason) *reason = "ok";
+    return true;
+}
+
 ComposeResult ComposeGroupSequential(const ProjectTrichromeGroup& group,
-                                     bool force_mono) {
+                                     bool force_mono,
+                                     DecodeMode decode_mode) {
     ComposeResult result;
     const bool bayer = group.sensor_type == "bayer";
     struct DecodedSource {
@@ -81,7 +466,7 @@ ComposeResult ComposeGroupSequential(const ProjectTrichromeGroup& group,
     try {
         for (const ProjectTrichromeSource& source : group.sources) {
             decoded_sources.push_back(
-                {source.role, DecodeLinear(source.path, force_mono)});
+                {source.role, DecodeLinear(source.path, force_mono, decode_mode)});
         }
     } catch (...) {
         result.reason = "compose_decode_exception";
@@ -121,33 +506,109 @@ ComposeResult ComposeGroupSequential(const ProjectTrichromeGroup& group,
     return result;
 }
 
-QImage ComposeGroupToDisplayImage(const ProjectTrichromeGroup& group,
+QImage ComposeGroupToEncodedImage(const ProjectTrichromeGroup& group,
                                   const QString& sensor_mode,
+                                  DecodeMode decode_mode,
+                                  int max_edge,
+                                  const QString& output_color_space,
+                                  int bit_depth,
                                   QString* reason) {
     const bool force_mono = sensor_mode != "bayer";
-    ComposeResult result = ComposeGroupSequential(group, force_mono);
+    ComposeResult result = ComposeGroupSequential(group, force_mono, decode_mode);
     if (!result.ok) {
         if (reason) *reason = QString::fromStdString(result.reason);
         return {};
     }
     const cv::Vec3d white = EstimateRgbChannelWhite(result.rgb);
     NormalizeRgbByChannelWhite(&result.rgb, white);
-    QImage image = ImageBufToQImage(result.rgb);
+    if (max_edge > 0)
+        result.rgb = ResizeLongEdge(result.rgb, max_edge);
+    QImage image = LinearRgbToQImage(result.rgb, output_color_space, bit_depth);
     if (image.isNull() && reason) *reason = "preview_image_empty";
     else if (reason) *reason = "ok";
     return image;
 }
 
+QImage ComposeGroupToSrgbDisplayImage(const ProjectTrichromeGroup& group,
+                                      const QString& sensor_mode,
+                                      DecodeMode decode_mode,
+                                     int max_edge,
+                                     QString* reason) {
+    return ComposeGroupToEncodedImage(group, sensor_mode, decode_mode, max_edge,
+                                      kDisplayColorSpace, 8, reason);
+}
+
 TrichromeCacheInput CacheInputFor(const ProjectTrichromeGroup& group,
                                   const QString& sensor_mode,
-                                  const QString& role_order) {
+                                  const QString& role_order,
+                                  DecodeMode decode_mode) {
     TrichromeCacheInput input;
     input.sensor_mode = sensor_mode.toStdString();
     input.role_order = role_order.toStdString();
+    input.decode_mode =
+        decode_mode == DecodeMode::kPreview ? "preview" : "export";
+    input.max_edge = decode_mode == DecodeMode::kPreview
+        ? kPreviewCacheMaxEdge
+        : 0;
     input.paths.reserve(group.sources.size());
     for (const ProjectTrichromeSource& source : group.sources)
         input.paths.emplace_back(source.path);
     return input;
+}
+
+ComposeTaskResult ComposePreviewFrame(int generation,
+                                      int group_index,
+                                      const ProjectTrichromeGroup& group,
+                                      const QString& sensor_mode,
+                                      const QString& role_order) {
+    ComposeTaskResult task_result;
+    task_result.generation = generation;
+    task_result.group_index = group_index;
+
+    TrichromePreviewCache cache;
+    const TrichromeCacheInput cache_input =
+        CacheInputFor(group, sensor_mode, role_order, DecodeMode::kPreview);
+    const CacheLookupResult cached = cache.lookup(cache_input);
+    if (cached.hit) {
+        task_result.ok = true;
+        task_result.cache_hit = true;
+        task_result.image = cached.image;
+        task_result.status = QString("Frame %1 restored from cache").arg(group_index + 1);
+        return task_result;
+    }
+
+    ObsLog("trichrome.compose", {{"event", "start"},
+                                 {"group", std::to_string(group_index)},
+                                 {"sensor", sensor_mode.toStdString()},
+                                 {"decode_mode", "preview"}});
+    QString reason;
+    QImage image = ComposeGroupToSrgbDisplayImage(
+        group, sensor_mode, DecodeMode::kPreview,
+        kPreviewCacheMaxEdge, &reason);
+    if (image.isNull()) {
+        task_result.status = reason;
+    } else {
+        std::filesystem::path cache_path;
+        std::string write_reason;
+        const bool cache_written =
+            cache.write(cached.key, image, &cache_path, &write_reason);
+        if (!cache_written) {
+            ObsLog("cache.write", {{"category", "trichrome_preview"},
+                                   {"result", "ignored"},
+                                   {"reason", write_reason}});
+        }
+        task_result.ok = true;
+        task_result.image = image;
+        task_result.status = QString("Frame %1 composed").arg(group_index + 1);
+        ObsLog("display.preview", {{"event", "cache_source_ready"},
+                                   {"width", std::to_string(image.width())},
+                                   {"height", std::to_string(image.height())},
+                                   {"max_edge", std::to_string(kPreviewCacheMaxEdge)}});
+    }
+    ObsLog("trichrome.compose", {{"event", "finish"},
+                                 {"group", std::to_string(group_index)},
+                                 {"result", task_result.ok ? "ok" : "fail"}});
+    return task_result;
 }
 
 }  // namespace
@@ -156,57 +617,66 @@ TrichromeController::TrichromeController(TrichromeImageProvider* image_provider,
                                          QObject* parent)
     : QObject(parent), image_provider_(image_provider) {}
 
-void TrichromeController::chooseFiles() {
-    const QStringList picked = QFileDialog::getOpenFileNames(
+void TrichromeController::chooseImport() {
+    std::vector<std::filesystem::path> picked;
+#if defined(__APPLE__)
+    picked = NativeOpenFilesOrFolders("Choose trichrome photos or folder");
+#else
+    const QStringList file_paths = QFileDialog::getOpenFileNames(
         nullptr, "Choose trichrome photos", QString(), fileFilter());
-    std::vector<std::filesystem::path> paths;
-    paths.reserve(picked.size());
-    for (const QString& path : picked) paths.emplace_back(path.toStdString());
-    addFiles(std::move(paths));
-}
+    picked.reserve(file_paths.size());
+    for (const QString& path : file_paths) picked.emplace_back(path.toStdString());
+#endif
+    if (picked.empty()) return;
+    const std::vector<std::filesystem::path> paths = resolveImportSelection(picked);
+    if (paths.empty()) return;
 
-void TrichromeController::chooseFolder() {
-    const QString folder = QFileDialog::getExistingDirectory(
-        nullptr, "Choose trichrome folder");
-    if (folder.isEmpty()) return;
-    std::vector<std::filesystem::path> paths;
-    QDir dir(folder);
-    const QFileInfoList entries = dir.entryInfoList(QDir::Files, QDir::Name);
-    for (const QFileInfo& info : entries) {
-        std::filesystem::path path(info.absoluteFilePath().toStdString());
-        if (IsImportableRawPath(path)) paths.push_back(std::move(path));
+    if (!files_.empty()) {
+        ++compose_generation_;
+        ++process_generation_;
+        ++export_generation_;
+        cancelAndDrainWorkers(30000);
+        files_.clear();
+        groups_model_.clear();
+        active_group_ = -1;
+        preview_source_.clear();
+        current_preview_ = QImage();
+        if (image_provider_) image_provider_->clearPreview();
+        emit groupsChanged();
+        emit activeGroupChanged();
+        emit previewChanged();
     }
-    addFiles(std::move(paths));
+    addFiles(paths);
 }
 
-void TrichromeController::openProject() {
-    const QString picked = QFileDialog::getOpenFileName(
-        nullptr, "Open SoftLoaf Trichrome project", QString(), projectFileFilter());
-    if (picked.isEmpty()) return;
-    loadProjectFrom(picked);
-}
-
-void TrichromeController::saveProject() {
-    if (project_path_.isEmpty()) {
-        saveProjectAs();
-        return;
+std::vector<std::filesystem::path> TrichromeController::resolveImportSelection(
+    const std::vector<std::filesystem::path>& picked) const {
+    std::vector<std::filesystem::path> paths;
+    bool includes_directory = false;
+    for (const std::filesystem::path& picked_path : picked) {
+        std::error_code ec;
+        if (std::filesystem::is_directory(picked_path, ec)) {
+            includes_directory = true;
+            const std::string suffix = DetectDominantRawSuffix(picked_path);
+            if (suffix.empty()) continue;
+            std::vector<std::filesystem::path> folder_paths =
+                CollectRollFrames(picked_path, suffix);
+            paths.insert(paths.end(), folder_paths.begin(), folder_paths.end());
+        } else if (std::filesystem::is_regular_file(picked_path, ec) &&
+                   IsImportableRawPath(picked_path)) {
+            paths.push_back(picked_path);
+        }
     }
-    saveProjectTo(project_path_);
-}
-
-void TrichromeController::saveProjectAs() {
-    QString picked = QFileDialog::getSaveFileName(
-        nullptr, "Save SoftLoaf Trichrome project",
-        project_path_.isEmpty() ? QString("Untitled.sltrichrome") : project_path_,
-        projectFileFilter());
-    if (picked.isEmpty()) return;
-    if (!picked.endsWith(".sltrichrome", Qt::CaseInsensitive))
-        picked += ".sltrichrome";
-    saveProjectTo(picked);
+    if (includes_directory) {
+        std::sort(paths.begin(), paths.end());
+        paths.erase(std::unique(paths.begin(), paths.end()), paths.end());
+    }
+    return paths;
 }
 
 void TrichromeController::clear() {
     ++compose_generation_;
+    ++process_generation_;
     ++export_generation_;
     cancelAndDrainWorkers(30000);
     files_.clear();
@@ -215,9 +685,6 @@ void TrichromeController::clear() {
     preview_source_.clear();
     current_preview_ = QImage();
     if (image_provider_) image_provider_->clearPreview();
-    project_path_.clear();
-    emit projectPathChanged();
-    setDirty(false);
     setStatus("No photos loaded");
     emit groupsChanged();
     emit activeGroupChanged();
@@ -240,6 +707,13 @@ void TrichromeController::composeActive() {
         setStatus("Load at least one complete R/G/B group");
         return;
     }
+    const std::vector<std::filesystem::path> active_paths = pathsForGroup(active_group_);
+    for (const auto& path : active_paths) {
+        if (!PathExists(path)) {
+            setStatus("Frame has missing sources");
+            return;
+        }
+    }
     const int generation = ++compose_generation_;
     const int group_index = active_group_;
     const QString sensor_mode = sensor_mode_;
@@ -258,47 +732,8 @@ void TrichromeController::composeActive() {
         ObsLog("task.started", {{"task", "PreviewCompose"},
                                 {"generation", std::to_string(generation)},
                                 {"group", std::to_string(group_index)}});
-        ComposeTaskResult task_result;
-        task_result.generation = generation;
-        task_result.group_index = group_index;
-
-        TrichromePreviewCache cache;
-        const TrichromeCacheInput cache_input =
-            CacheInputFor(group, sensor_mode, role_order);
-        const CacheLookupResult cached = cache.lookup(cache_input);
-        if (cached.hit) {
-            task_result.ok = true;
-            task_result.cache_hit = true;
-            task_result.image = cached.image;
-            task_result.status = QString("Frame %1 restored from cache").arg(group_index + 1);
-        } else {
-            const bool force_mono = sensor_mode != "bayer";
-            ObsLog("trichrome.compose", {{"event", "start"},
-                                         {"group", std::to_string(group_index)},
-                                         {"sensor", sensor_mode.toStdString()}});
-            QString reason;
-            QImage image = ComposeGroupToDisplayImage(group, sensor_mode, &reason);
-            if (image.isNull()) {
-                task_result.status = reason;
-            } else {
-                std::filesystem::path cache_path;
-                std::string write_reason;
-                const bool cache_written =
-                    cache.write(cached.key, image, &cache_path, &write_reason);
-                if (!cache_written) {
-                    ObsLog("cache.write", {{"category", "trichrome_preview"},
-                                           {"result", "ignored"},
-                                           {"reason", write_reason}});
-                }
-                task_result.ok = true;
-                task_result.image = image;
-                task_result.status =
-                    QString("Frame %1 composed").arg(group_index + 1);
-            }
-            ObsLog("trichrome.compose", {{"event", "finish"},
-                                         {"group", std::to_string(group_index)},
-                                         {"result", task_result.ok ? "ok" : "fail"}});
-        }
+        ComposeTaskResult task_result =
+            ComposePreviewFrame(generation, group_index, group, sensor_mode, role_order);
 
         if (!self) return;
         QMetaObject::invokeMethod(self, [self, task_result = std::move(task_result)]() mutable {
@@ -332,39 +767,90 @@ void TrichromeController::composeActive() {
     addWorker(worker, "PreviewCompose");
 }
 
-void TrichromeController::exportActive() {
+void TrichromeController::chooseExport() {
+    const QString target = QFileDialog::getExistingDirectory(nullptr, "Choose export folder");
+    if (target.isEmpty()) return;
+    exportActiveTo(target, ExportSettings{});
+}
+
+void TrichromeController::startExport(const QUrl& folder_url,
+                                      bool export_all,
+                                      const QString& format,
+                                      const QString& color_space,
+                                      int bit_depth,
+                                      int jpeg_quality) {
+    QString folder = folder_url.isLocalFile() ? folder_url.toLocalFile() : folder_url.toString();
+    if (folder.isEmpty()) {
+        setStatus("Choose an export folder");
+        return;
+    }
+    ExportSettings settings;
+    settings.format = NormalizeExportFormat(format);
+    settings.color_space = NormalizeExportColorSpace(color_space);
+    settings.bit_depth = NormalizeExportBitDepth(settings.format, bit_depth);
+    settings.jpeg_quality = std::clamp(jpeg_quality, 1, 100);
+    if (export_all)
+        exportAllTo(folder, settings);
+    else
+        exportActiveTo(folder, settings);
+}
+
+void TrichromeController::exportActiveTo(const QString& folder, const ExportSettings& settings) {
     if (active_group_ < 0 || active_group_ * 3 + 2 >= static_cast<int>(files_.size())) return;
-    const QString suggested = QString("trichrome_frame_%1.png")
-        .arg(active_group_ + 1, 4, 10, QLatin1Char('0'));
-    const QString path = QFileDialog::getSaveFileName(
-        nullptr, "Export trichrome frame", suggested,
-        "PNG Image (*.png);;TIFF Image (*.tif *.tiff);;JPEG Image (*.jpg *.jpeg)");
-    if (path.isEmpty()) return;
+    const std::vector<std::filesystem::path> active_paths = pathsForGroup(active_group_);
+    for (const auto& path : active_paths) {
+        if (!PathExists(path)) {
+            setStatus("Resolve missing sources before export");
+            return;
+        }
+    }
+    if (folder.isEmpty()) return;
+    QDir dir(folder);
+    if (!dir.exists() && !dir.mkpath(".")) {
+        setStatus("Could not create export folder");
+        return;
+    }
     const int generation = ++export_generation_;
     const int group_index = active_group_;
     const QString sensor_mode = sensor_mode_;
     const ProjectTrichromeGroup group = projectGroupFor(group_index);
     ObsLog("command.received", {{"command", "ExportFrame"},
-                                {"group", std::to_string(group_index)}});
+                                {"group", std::to_string(group_index)},
+                                {"format", settings.format.toStdString()},
+                                {"bit_depth", std::to_string(settings.bit_depth)},
+                                {"icc", ExportCanEmbedIcc(settings.color_space) ? "embedded" : "none"},
+                                {"color_space", settings.color_space.toStdString()}});
     setBusy(true);
     QPointer<TrichromeController> self(this);
     QThread* worker = QThread::create([self, generation, group, group_index,
-                                       sensor_mode, path]() {
+                                       sensor_mode, folder, settings]() {
         ObsLog("task.started", {{"task", "ExportFrame"},
                                 {"generation", std::to_string(generation)},
-                                {"group", std::to_string(group_index)}});
+                                {"group", std::to_string(group_index)},
+                                {"decode_mode", "export"},
+                                {"format", settings.format.toStdString()},
+                                {"bit_depth", std::to_string(settings.bit_depth)},
+                                {"icc", ExportCanEmbedIcc(settings.color_space) ? "embedded" : "none"},
+                                {"color_space", settings.color_space.toStdString()}});
         ExportTaskResult result;
         result.generation = generation;
         QString reason;
-        const QImage image = ComposeGroupToDisplayImage(group, sensor_mode, &reason);
+        const QImage image = ComposeGroupToEncodedImage(
+            group, sensor_mode, DecodeMode::kExport, 0,
+            settings.color_space, settings.bit_depth, &reason);
+        const QString out = QDir(folder).filePath(
+            QString("trichrome_frame_%1.%2")
+                .arg(group_index + 1, 4, 10, QLatin1Char('0'))
+                .arg(ExportExtension(settings.format)));
         if (image.isNull()) {
             result.status = reason;
-        } else if (!image.save(path)) {
-            result.status = "Export failed";
+        } else if (!WriteExportImage(image, out, settings, &reason)) {
+            result.status = "Export failed: " + reason;
         } else {
             result.ok = true;
             result.exported = 1;
-            result.status = "Exported " + QFileInfo(path).fileName();
+            result.status = QString("Exported %1 (%2)")
+                .arg(QFileInfo(out).fileName(), ExportEncodingLabel(settings));
         }
         if (!self) return;
         QMetaObject::invokeMethod(self, [self, result = std::move(result)]() {
@@ -385,47 +871,72 @@ void TrichromeController::exportActive() {
     addWorker(worker, "ExportFrame");
 }
 
-void TrichromeController::exportAll() {
+void TrichromeController::exportAllTo(const QString& folder, const ExportSettings& settings) {
     const int complete_groups = static_cast<int>(files_.size()) / 3;
     if (complete_groups <= 0) return;
-    const QString folder = QFileDialog::getExistingDirectory(
-        nullptr, "Choose export folder");
+    for (int i = 0; i < complete_groups; ++i) {
+        for (const auto& path : pathsForGroup(i)) {
+            if (!PathExists(path)) {
+                setStatus("Resolve missing sources before export");
+                return;
+            }
+        }
+    }
     if (folder.isEmpty()) return;
+    QDir dir(folder);
+    if (!dir.exists() && !dir.mkpath(".")) {
+        setStatus("Could not create export folder");
+        return;
+    }
     const int generation = ++export_generation_;
     const QString sensor_mode = sensor_mode_;
     std::vector<ProjectTrichromeGroup> groups;
     groups.reserve(complete_groups);
     for (int i = 0; i < complete_groups; ++i) groups.push_back(projectGroupFor(i));
     ObsLog("command.received", {{"command", "ExportAll"},
-                                {"groups", std::to_string(complete_groups)}});
+                                {"groups", std::to_string(complete_groups)},
+                                {"format", settings.format.toStdString()},
+                                {"bit_depth", std::to_string(settings.bit_depth)},
+                                {"icc", ExportCanEmbedIcc(settings.color_space) ? "embedded" : "none"},
+                                {"color_space", settings.color_space.toStdString()}});
     setBusy(true);
     QPointer<TrichromeController> self(this);
     QThread* worker = QThread::create([self, generation, groups = std::move(groups),
-                                       sensor_mode, folder]() {
+                                       sensor_mode, folder, settings]() {
         ObsLog("task.started", {{"task", "ExportAll"},
                                 {"generation", std::to_string(generation)},
-                                {"groups", std::to_string(groups.size())}});
+                                {"groups", std::to_string(groups.size())},
+                                {"decode_mode", "export"},
+                                {"format", settings.format.toStdString()},
+                                {"bit_depth", std::to_string(settings.bit_depth)},
+                                {"icc", ExportCanEmbedIcc(settings.color_space) ? "embedded" : "none"},
+                                {"color_space", settings.color_space.toStdString()}});
         ExportTaskResult result;
         result.generation = generation;
         for (size_t i = 0; i < groups.size(); ++i) {
             QString reason;
-            const QImage image = ComposeGroupToDisplayImage(groups[i], sensor_mode, &reason);
+            const QImage image = ComposeGroupToEncodedImage(
+                groups[i], sensor_mode, DecodeMode::kExport, 0,
+                settings.color_space, settings.bit_depth, &reason);
             if (image.isNull()) {
                 result.status = QString("Frame %1: %2").arg(i + 1).arg(reason);
                 break;
             }
             const QString out = QDir(folder).filePath(
-                QString("trichrome_frame_%1.png")
-                    .arg(static_cast<int>(i) + 1, 4, 10, QLatin1Char('0')));
-            if (!image.save(out)) {
-                result.status = QString("Frame %1 export failed").arg(i + 1);
+                QString("trichrome_frame_%1.%2")
+                    .arg(static_cast<int>(i) + 1, 4, 10, QLatin1Char('0'))
+                    .arg(ExportExtension(settings.format)));
+            if (!WriteExportImage(image, out, settings, &reason)) {
+                result.status = QString("Frame %1 export failed: %2").arg(i + 1).arg(reason);
                 break;
             }
             ++result.exported;
         }
         result.ok = result.exported == static_cast<int>(groups.size());
         if (result.ok)
-            result.status = QString("Exported %1 frames").arg(result.exported);
+            result.status = QString("Exported %1 frames (%2)")
+                .arg(result.exported)
+                .arg(ExportEncodingLabel(settings));
         if (!self) return;
         QMetaObject::invokeMethod(self, [self, result = std::move(result)]() {
             if (!self) return;
@@ -451,8 +962,8 @@ void TrichromeController::setSensorMode(const QString& value) {
     if (sensor_mode_ == value) return;
     sensor_mode_ = value;
     emit sensorModeChanged();
-    setDirty(true);
     composeActive();
+    startBackgroundFrameProcessing();
 }
 
 void TrichromeController::setRoleOrder(const QString& value) {
@@ -460,8 +971,8 @@ void TrichromeController::setRoleOrder(const QString& value) {
     role_order_ = value;
     emit roleOrderChanged();
     rebuildGroupModel();
-    setDirty(true);
     composeActive();
+    startBackgroundFrameProcessing();
 }
 
 void TrichromeController::setSortMode(const QString& value) {
@@ -469,7 +980,6 @@ void TrichromeController::setSortMode(const QString& value) {
     if (sort_mode_ == value) return;
     sort_mode_ = value;
     emit sortModeChanged();
-    setDirty(true);
     regroup();
 }
 
@@ -485,12 +995,6 @@ void TrichromeController::setBusy(bool busy) {
     emit busyChanged();
 }
 
-void TrichromeController::setDirty(bool dirty) {
-    if (dirty_ == dirty) return;
-    dirty_ = dirty;
-    emit dirtyChanged();
-}
-
 void TrichromeController::addFiles(std::vector<std::filesystem::path> paths) {
     bool changed = false;
     for (std::filesystem::path& path : paths) {
@@ -498,7 +1002,7 @@ void TrichromeController::addFiles(std::vector<std::filesystem::path> paths) {
         files_.push_back(SourceFile{std::move(path), static_cast<int>(files_.size())});
         changed = true;
     }
-    if (changed) setDirty(true);
+    if (!changed) return;
     regroup();
 }
 
@@ -526,6 +1030,7 @@ void TrichromeController::addWorker(QThread* worker, const QString& task_name) {
 
 void TrichromeController::cancelAndDrainWorkers(int timeout_ms) {
     ++compose_generation_;
+    ++process_generation_;
     ++export_generation_;
     ObsLog("worker.drain", {{"event", "start"},
                             {"active", std::to_string(active_workers_)}});
@@ -548,8 +1053,152 @@ void TrichromeController::shutdown() {
     cancelAndDrainWorkers(30000);
 }
 
+void TrichromeController::startBackgroundFrameProcessing() {
+    const int complete_groups = static_cast<int>(files_.size()) / 3;
+    if (complete_groups <= 0) return;
+    for (int i = 0; i < complete_groups; ++i) {
+        for (const auto& path : pathsForGroup(i)) {
+            if (!PathExists(path)) {
+                setStatus("Frame has missing sources");
+                return;
+            }
+        }
+    }
+
+    for (const QPointer<QThread>& worker : workers_) {
+        if (worker && worker->objectName() == "ProcessImportedFramesWorker")
+            worker->requestInterruption();
+    }
+
+    const int generation = ++process_generation_;
+    const QString sensor_mode = sensor_mode_;
+    const QString role_order = role_order_;
+    auto groups = std::make_shared<std::vector<ProjectTrichromeGroup>>();
+    groups->reserve(complete_groups);
+    for (int i = 0; i < complete_groups; ++i) groups->push_back(projectGroupFor(i));
+    const int logical_cpus = LogicalCpuCount();
+    const uint64_t physical_memory = PhysicalMemoryBytes();
+    const int cpu_bound = CpuBoundFrameConcurrency(logical_cpus);
+    const int memory_bound = MemoryBoundFrameConcurrency(physical_memory);
+    const int worker_count = BackgroundFrameConcurrency(complete_groups);
+    auto next_group = std::make_shared<std::atomic<int>>(0);
+    auto processed = std::make_shared<std::atomic<int>>(0);
+    auto failed = std::make_shared<std::atomic<int>>(0);
+    auto remaining_workers = std::make_shared<std::atomic<int>>(worker_count);
+
+    ObsLog("command.accepted", {{"command", "ProcessImportedFrames"},
+                                {"policy", "parallel_limited"},
+                                {"generation", std::to_string(generation)},
+                                {"groups", std::to_string(complete_groups)},
+                                {"workers", std::to_string(worker_count)},
+                                {"logical_cpus", std::to_string(logical_cpus)},
+                                {"memory_gib", std::to_string(physical_memory / kGiB)},
+                                {"cpu_bound", std::to_string(cpu_bound)},
+                                {"memory_bound", std::to_string(memory_bound)}});
+    setStatus(QString("Processing 0/%1 frames").arg(complete_groups));
+
+    QPointer<TrichromeController> self(this);
+    for (int lane = 0; lane < worker_count; ++lane) {
+        QThread* worker = QThread::create(
+            [self, generation, groups, sensor_mode, role_order, next_group,
+             processed, failed, remaining_workers, lane]() mutable {
+                const int total = static_cast<int>(groups->size());
+                ObsLog("task.started", {{"task", "ProcessImportedFrames"},
+                                        {"generation", std::to_string(generation)},
+                                        {"groups", std::to_string(total)},
+                                        {"decode_mode", "preview"},
+                                        {"lane", std::to_string(lane)}});
+
+                while (!QThread::currentThread()->isInterruptionRequested()) {
+                    const int group_index = next_group->fetch_add(1);
+                    if (group_index >= total) break;
+
+                    ComposeTaskResult task_result = ComposePreviewFrame(
+                        generation, group_index, (*groups)[group_index], sensor_mode, role_order);
+                    const int processed_count = processed->fetch_add(1) + 1;
+                    if (!task_result.ok) failed->fetch_add(1);
+
+                    if (!self) return;
+                    QMetaObject::invokeMethod(
+                        self,
+                        [self, task_result = std::move(task_result), processed_count, total,
+                         lane]() mutable {
+                            if (!self) return;
+                            if (task_result.generation != self->process_generation_) {
+                                ObsLog("task.stale_drop",
+                                       {{"task", "ProcessImportedFrames"},
+                                        {"generation", std::to_string(task_result.generation)},
+                                        {"group", std::to_string(task_result.group_index)}});
+                                return;
+                            }
+                            if (task_result.ok &&
+                                task_result.group_index == self->active_group_) {
+                                self->preview_source_ =
+                                    self->publishPreview(task_result.image);
+                                self->current_preview_ = task_result.image;
+                                emit self->previewChanged();
+                                ObsLog("display.preview",
+                                       {{"event", "publish"},
+                                        {"generation", std::to_string(task_result.generation)},
+                                        {"group", std::to_string(task_result.group_index)},
+                                        {"source", "background_cache"}});
+                            }
+                            if (task_result.ok) {
+                                self->setStatus(QString("Processed %1/%2 frames")
+                                                    .arg(processed_count)
+                                                    .arg(total));
+                            } else {
+                                self->setStatus(QString("Frame %1: %2")
+                                                    .arg(task_result.group_index + 1)
+                                                    .arg(task_result.status));
+                            }
+                            ObsLog("task.progress",
+                                   {{"task", "ProcessImportedFrames"},
+                                    {"generation", std::to_string(task_result.generation)},
+                                    {"group", std::to_string(task_result.group_index)},
+                                    {"processed", std::to_string(processed_count)},
+                                    {"total", std::to_string(total)},
+                                    {"result", task_result.ok ? "ok" : "fail"},
+                                    {"cache", task_result.cache_hit ? "hit" : "miss"},
+                                    {"lane", std::to_string(lane)}});
+                        },
+                        Qt::QueuedConnection);
+                }
+
+                const int remaining = remaining_workers->fetch_sub(1) - 1;
+                if (remaining != 0 || !self) return;
+                const int processed_count = processed->load();
+                const bool all_ok = failed->load() == 0 && processed_count == total;
+                QMetaObject::invokeMethod(
+                    self,
+                    [self, generation, processed_count, total, all_ok]() {
+                        if (!self) return;
+                        if (generation != self->process_generation_) {
+                            ObsLog("task.stale_drop",
+                                   {{"task", "ProcessImportedFrames"},
+                                    {"generation", std::to_string(generation)}});
+                            return;
+                        }
+                        if (all_ok) {
+                            self->setStatus(QString("Processed %1 frames").arg(total));
+                        }
+                        ObsLog("task.finished", {{"task", "ProcessImportedFrames"},
+                                                 {"generation", std::to_string(generation)},
+                                                 {"result", all_ok ? "ok" : "fail"},
+                                                 {"processed", std::to_string(processed_count)},
+                                                 {"total", std::to_string(total)}});
+                    },
+                    Qt::QueuedConnection);
+            });
+        worker->setObjectName("ProcessImportedFramesWorker");
+        worker->setStackSize(8 * 1024 * 1024);
+        addWorker(worker, "ProcessImportedFrames");
+    }
+}
+
 void TrichromeController::regroup() {
     ++compose_generation_;
+    ++process_generation_;
     if (sort_mode_ == "filename") {
         std::sort(files_.begin(), files_.end(), [](const SourceFile& a, const SourceFile& b) {
             return a.path.filename().string() < b.path.filename().string();
@@ -574,7 +1223,7 @@ void TrichromeController::regroup() {
     setStatus(QString("%1 photos · %2 complete frames")
                   .arg(files_.size())
                   .arg(complete_groups));
-    composeActive();
+    startBackgroundFrameProcessing();
 }
 
 void TrichromeController::rebuildGroupModel() {
@@ -583,15 +1232,18 @@ void TrichromeController::rebuildGroupModel() {
     for (int group = 0; group < group_count; ++group) {
         QVariantMap item;
         item["index"] = group;
-        item["complete"] = group * 3 + 2 < static_cast<int>(files_.size());
+        const bool has_three = group * 3 + 2 < static_cast<int>(files_.size());
+        item["complete"] = has_three;
         item["title"] = QString("Frame %1").arg(group + 1);
         QVariantList sources;
         for (int offset = 0; offset < 3 && group * 3 + offset < static_cast<int>(files_.size()); ++offset) {
+            const int source_index = group * 3 + offset;
             QVariantMap source;
             source["role"] = RoleName(role_order_[offset]);
             source["roleShort"] = QString(role_order_[offset]);
-            source["name"] = BaseName(files_[group * 3 + offset].path);
-            source["path"] = PathString(files_[group * 3 + offset].path);
+            source["name"] = BaseName(files_[source_index].path);
+            source["path"] = PathString(files_[source_index].path);
+            source["sourceIndex"] = source_index;
             sources.push_back(source);
         }
         item["sources"] = sources;
@@ -638,66 +1290,10 @@ QString TrichromeController::fileFilter() const {
     return "Supported images (*.3fr *.fff *.dng *.arw *.cr2 *.cr3 *.nef *.raf *.raw *.rw2 *.orf *.pef *.srw *.tif *.tiff *.jpg *.jpeg *.png);;All files (*)";
 }
 
-QString TrichromeController::projectFileFilter() const {
-    return "SoftLoaf Trichrome Project (*.sltrichrome);;All files (*)";
-}
-
 QString TrichromeController::publishPreview(const QImage& image) {
     if (image.isNull()) return {};
     if (image_provider_) image_provider_->setPreview(image);
     return QString("image://trichrome/preview?rev=%1").arg(++preview_rev_);
-}
-
-bool TrichromeController::saveProjectTo(const QString& path) {
-    ProjectDocument doc;
-    doc.sensor_mode = sensor_mode_.toStdString();
-    doc.role_order = role_order_.toStdString();
-    doc.sort_mode = sort_mode_.toStdString();
-    doc.active_group = active_group_;
-    doc.files.reserve(files_.size());
-    for (const SourceFile& file : files_)
-        doc.files.push_back(ProjectSourceFile{file.path, file.selection_index});
-    std::string err;
-    if (!SaveProjectDocument(path.toStdString(), doc, &err)) {
-        setStatus("Save failed: " + QString::fromStdString(err));
-        ObsLog("project.save", {{"result", "fail"}, {"reason", err}});
-        return false;
-    }
-    project_path_ = path;
-    emit projectPathChanged();
-    setDirty(false);
-    setStatus("Saved " + QFileInfo(path).fileName());
-    ObsLog("project.save", {{"result", "ok"}, {"path", path.toStdString()}});
-    return true;
-}
-
-bool TrichromeController::loadProjectFrom(const QString& path) {
-    ProjectDocument doc;
-    std::string err;
-    if (!LoadProjectDocument(path.toStdString(), &doc, &err)) {
-        setStatus("Open failed: " + QString::fromStdString(err));
-        ObsLog("project.open", {{"result", "fail"}, {"reason", err}});
-        return false;
-    }
-    cancelAndDrainWorkers(30000);
-    files_.clear();
-    for (const ProjectSourceFile& file : doc.files)
-        files_.push_back(SourceFile{file.path, file.selection_index});
-    sensor_mode_ = QString::fromStdString(doc.sensor_mode);
-    role_order_ = QString::fromStdString(doc.role_order);
-    sort_mode_ = QString::fromStdString(doc.sort_mode);
-    project_path_ = path;
-    active_group_ = doc.active_group;
-    emit sensorModeChanged();
-    emit roleOrderChanged();
-    emit sortModeChanged();
-    emit projectPathChanged();
-    setDirty(false);
-    regroup();
-    setDirty(false);
-    setStatus("Opened " + QFileInfo(path).fileName());
-    ObsLog("project.open", {{"result", "ok"}, {"path", path.toStdString()}});
-    return true;
 }
 
 }  // namespace softloaf::trichrome::desktop

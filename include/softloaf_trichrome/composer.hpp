@@ -27,7 +27,8 @@
 namespace softloaf::trichrome {
 
 inline constexpr const char* kDefaultArtifactFormat = "rgb16_npy";
-inline constexpr const char* kArtifactColorState = "ap0_rgb_linear_roll_rgb_white_p999";
+inline constexpr const char* kTrichromeWorkingSpace = "linear_srgb_trichrome";
+inline constexpr const char* kArtifactColorState = "linear_srgb_trichrome_roll_rgb_white_p999";
 
 struct ComposeResult {
     bool ok = false;
@@ -49,24 +50,35 @@ struct ArtifactBuildResult {
 using ImageDecoder = std::function<ImageBuf(const std::filesystem::path&)>;
 
 inline ImageBuf ResizeLongEdge(const ImageBuf& image, int long_edge) {
-    ImageBuf out;
     if (image.empty() || long_edge <= 0) return image;
     const int edge = std::max(image.width(), image.height());
     if (edge <= long_edge) return image;
+    ImageBuf out = image;
     const double scale = static_cast<double>(long_edge) / static_cast<double>(edge);
     cv::resize(image.data, out.data, cv::Size(), scale, scale, cv::INTER_AREA);
-    out.state = image.state;
     return out;
 }
 
-inline bool IsCameraLinearMono(const ImageBuf& image) {
-    return !image.empty() && image.state == ColorState::kCameraLinear &&
+inline bool IsSceneLinearMono(const ImageBuf& image) {
+    return !image.empty() &&
+           (image.state == ColorState::kCameraLinear ||
+            image.state == ColorState::kWorkingLinear) &&
            image.data.depth() == CV_32F && image.data.channels() == 1;
 }
 
-inline bool IsCameraLinearRgb(const ImageBuf& image) {
-    return !image.empty() && image.state == ColorState::kCameraLinear &&
+inline bool IsSceneLinearRgb(const ImageBuf& image) {
+    return !image.empty() &&
+           (image.state == ColorState::kCameraLinear ||
+            image.state == ColorState::kWorkingLinear) &&
            image.data.depth() == CV_32F && image.data.channels() == 3;
+}
+
+inline bool IsCameraLinearMono(const ImageBuf& image) {
+    return IsSceneLinearMono(image) && image.state == ColorState::kCameraLinear;
+}
+
+inline bool IsCameraLinearRgb(const ImageBuf& image) {
+    return IsSceneLinearRgb(image) && image.state == ColorState::kCameraLinear;
 }
 
 inline bool IsBayerRoleRgb(const ImageBuf& image) {
@@ -94,7 +106,10 @@ inline ImageBuf ExtractRgbChannel(const ImageBuf& image, int channel) {
     ImageBuf out;
     if (!IsBayerRoleRgb(image) || channel < 0 || channel >= 3) return out;
     cv::extractChannel(image.data, out.data, channel);
-    out.state = ColorState::kCameraLinear;
+    out.state = image.state;
+    out.color_space = image.color_space;
+    out.camera_to_xyz_d50 = image.camera_to_xyz_d50;
+    out.has_camera_to_xyz_d50 = image.has_camera_to_xyz_d50;
     return out;
 }
 
@@ -108,7 +123,10 @@ inline ImageBuf AverageRgbChannels(const ImageBuf& image) {
         for (int x = 0; x < image.width(); ++x)
             dst[x] = (src[x][0] + src[x][1] + src[x][2]) * (1.0f / 3.0f);
     }
-    out.state = ColorState::kCameraLinear;
+    out.state = image.state;
+    out.color_space = image.color_space;
+    out.camera_to_xyz_d50 = image.camera_to_xyz_d50;
+    out.has_camera_to_xyz_d50 = image.has_camera_to_xyz_d50;
     return out;
 }
 
@@ -178,7 +196,8 @@ inline ComposeResult ComposeMonoRgb(const ImageBuf& red,
     const cv::Mat sources[] = {red.data, green.data, blue.data};
     const int from_to[] = {0, 0, 1, 1, 2, 2};
     cv::mixChannels(sources, 3, &result.rgb.data, 1, from_to, 3);
-    result.rgb.state = ColorState::kCameraLinear;
+    result.rgb.state = ColorState::kWorkingLinear;
+    result.rgb.color_space = kTrichromeWorkingSpace;
     result.ok = true;
     result.reason = "ok";
     return result;
@@ -199,7 +218,7 @@ using RgbChannelSamples = std::array<std::vector<float>, 3>;
 inline void AppendRgbChannelWhiteSamples(const ImageBuf& rgb,
                                          RgbChannelSamples* samples,
                                          int estimate_long_edge = 1024) {
-    if (!samples || !IsCameraLinearRgb(rgb)) return;
+    if (!samples || !IsSceneLinearRgb(rgb)) return;
     cv::Mat estimate = rgb.data;
     if (estimate_long_edge > 0 && std::max(rgb.width(), rgb.height()) > estimate_long_edge) {
         const double scale = static_cast<double>(estimate_long_edge) /
@@ -234,7 +253,7 @@ inline cv::Vec3d EstimateRgbChannelWhite(const ImageBuf& rgb,
 }
 
 inline bool NormalizeRgbByChannelWhite(ImageBuf* rgb, const cv::Vec3d& white) {
-    if (!rgb || !IsCameraLinearRgb(*rgb)) return false;
+    if (!rgb || !IsSceneLinearRgb(*rgb)) return false;
     const float inv[3] = {
         static_cast<float>(1.0 / std::max(1e-6, white[0])),
         static_cast<float>(1.0 / std::max(1e-6, white[1])),
@@ -301,7 +320,7 @@ inline ComposeResult ComposeGroup(const ProjectTrichromeGroup& group,
     result = ComposeMonoRgb(red, green, blue);
     if (!result.ok) return result;
     if (!nir.empty()) {
-        if (!IsCameraLinearMono(nir) ||
+        if (!IsSceneLinearMono(nir) ||
             nir.width() != result.rgb.width() || nir.height() != result.rgb.height()) {
             result.ok = false;
             result.reason = "compose_nir_mismatch";
@@ -355,7 +374,7 @@ inline std::string NpyHeaderV1(int height, int width, int channels) {
 inline bool WriteRgb16NpyAtomic(const ImageBuf& rgb,
                                 const std::filesystem::path& artifact_path,
                                 std::string* reason) {
-    if (!IsCameraLinearRgb(rgb)) {
+    if (!IsSceneLinearRgb(rgb)) {
         if (reason) *reason = "artifact_empty_or_non_rgb";
         return false;
     }

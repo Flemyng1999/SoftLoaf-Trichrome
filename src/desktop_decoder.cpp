@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cmath>
+#include <dlfcn.h>
 #include <memory>
 #include <string>
 
@@ -23,6 +25,67 @@ std::string LowerExt(const std::filesystem::path& path) {
     return ext;
 }
 
+float SrgbToLinear(float v) {
+    v = std::clamp(v, 0.0f, 1.0f);
+    if (v <= 0.04045f) return v / 12.92f;
+    return std::pow((v + 0.055f) / 1.055f, 2.4f);
+}
+
+void ConvertSrgbMatToLinear(cv::Mat* image) {
+    if (!image || image->empty() || image->depth() != CV_32F) return;
+    const int channels = image->channels();
+    for (int y = 0; y < image->rows; ++y) {
+        float* row = image->ptr<float>(y);
+        for (int x = 0; x < image->cols * channels; ++x)
+            row[x] = SrgbToLinear(row[x]);
+    }
+}
+
+std::array<double, 9> CameraToXyzD50(const LibRaw& raw, bool* ok) {
+    std::array<double, 9> m = {};
+    bool any = false;
+    for (int r = 0; r < 3; ++r) {
+        for (int c = 0; c < 3; ++c) {
+            const double v = raw.imgdata.color.cam_xyz[r][c];
+            m[static_cast<size_t>(r * 3 + c)] = v;
+            any = any || std::abs(v) > 1e-12;
+        }
+    }
+    if (ok) *ok = any;
+    return m;
+}
+
+const char* DecodeModeName(DecodeMode decode_mode) {
+    return decode_mode == DecodeMode::kPreview ? "preview" : "export";
+}
+
+void ConfigureRawDecodeParams(LibRaw* raw, DecodeMode decode_mode) {
+    raw->imgdata.params.output_color = 0;
+    raw->imgdata.params.output_bps = 16;
+    raw->imgdata.params.no_auto_bright = 1;
+    raw->imgdata.params.use_auto_wb = 0;
+    raw->imgdata.params.use_camera_wb = 0;
+    raw->imgdata.params.gamm[0] = 1.0;
+    raw->imgdata.params.gamm[1] = 1.0;
+    for (float& v : raw->imgdata.params.user_mul) v = 1.0f;
+
+    if (decode_mode == DecodeMode::kPreview) {
+        raw->imgdata.params.half_size = 1;
+        raw->imgdata.params.no_interpolation = 1;
+    } else {
+        raw->imgdata.params.half_size = 0;
+        raw->imgdata.params.no_interpolation = 0;
+    }
+}
+
+void LimitOpenMpForPreviewDecode(DecodeMode decode_mode) {
+    if (decode_mode != DecodeMode::kPreview) return;
+    using OmpSetNumThreads = void (*)(int);
+    static const auto omp_set_num_threads = reinterpret_cast<OmpSetNumThreads>(
+        dlsym(RTLD_DEFAULT, "omp_set_num_threads"));
+    if (omp_set_num_threads) omp_set_num_threads(1);
+}
+
 ImageBuf DecodeRegularImage(const std::filesystem::path& path, bool force_mono) {
     ImageBuf out;
     cv::Mat input = cv::imread(path.string(), cv::IMREAD_UNCHANGED);
@@ -37,6 +100,7 @@ ImageBuf DecodeRegularImage(const std::filesystem::path& path, bool force_mono) 
     if (float_img.channels() == 4) {
         cv::cvtColor(float_img, float_img, cv::COLOR_BGRA2BGR);
     }
+    ConvertSrgbMatToLinear(&float_img);
     if (force_mono) {
         if (float_img.channels() == 1) {
             out.data = float_img;
@@ -50,25 +114,23 @@ ImageBuf DecodeRegularImage(const std::filesystem::path& path, bool force_mono) 
             cv::cvtColor(float_img, out.data, cv::COLOR_BGR2RGB);
         }
     }
-    out.state = ColorState::kCameraLinear;
+    out.state = ColorState::kWorkingLinear;
+    out.color_space = "linear_srgb";
     return out;
 }
 
-ImageBuf DecodeRawImage(const std::filesystem::path& path, bool force_mono) {
+ImageBuf DecodeRawImage(const std::filesystem::path& path,
+                        bool force_mono,
+                        DecodeMode decode_mode) {
     ImageBuf out;
     // Keep LibRaw off the stack; large RAW decode paths can be stack-hungry.
     auto raw = std::make_unique<LibRaw>();
     if (raw->open_file(path.string().c_str()) != LIBRAW_SUCCESS) return out;
     if (raw->unpack() != LIBRAW_SUCCESS) return out;
+    out.camera_to_xyz_d50 = CameraToXyzD50(*raw, &out.has_camera_to_xyz_d50);
 
-    raw->imgdata.params.output_color = 0;
-    raw->imgdata.params.output_bps = 16;
-    raw->imgdata.params.no_auto_bright = 1;
-    raw->imgdata.params.use_auto_wb = 0;
-    raw->imgdata.params.use_camera_wb = 0;
-    raw->imgdata.params.gamm[0] = 1.0;
-    raw->imgdata.params.gamm[1] = 1.0;
-    for (float& v : raw->imgdata.params.user_mul) v = 1.0f;
+    ConfigureRawDecodeParams(raw.get(), decode_mode);
+    LimitOpenMpForPreviewDecode(decode_mode);
 
     if (raw->dcraw_process() != LIBRAW_SUCCESS) return out;
     int err = LIBRAW_SUCCESS;
@@ -98,6 +160,7 @@ ImageBuf DecodeRawImage(const std::filesystem::path& path, bool force_mono) {
             }
         }
         out.state = ColorState::kCameraLinear;
+        out.color_space = std::string("camera_native_linear_") + DecodeModeName(decode_mode);
     }
 
     LibRaw::dcraw_clear_mem(img);
@@ -110,10 +173,11 @@ bool LooksLikeRaw(const std::filesystem::path& path) {
     return IsRawLikeExtension(LowerExt(path));
 }
 
-ImageBuf DecodeLinear(const std::filesystem::path& path, bool force_mono) {
+ImageBuf DecodeLinear(const std::filesystem::path& path,
+                      bool force_mono,
+                      DecodeMode decode_mode) {
     if (LooksLikeRaw(path)) {
-        ImageBuf raw = DecodeRawImage(path, force_mono);
-        if (!raw.empty()) return raw;
+        return DecodeRawImage(path, force_mono, decode_mode);
     }
     return DecodeRegularImage(path, force_mono);
 }

@@ -24,18 +24,30 @@ target_include_directories(softloaf_trichrome INTERFACE
 target_link_libraries(softloaf_trichrome INTERFACE ${OpenCV_LIBS})
 
 if(SOFTLOAF_TRICHROME_BUILD_APP)
-    find_package(Qt6 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2 Widgets)
+    find_package(Qt6 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2 QuickDialogs2 Widgets)
+    if(APPLE)
+        enable_language(OBJCXX)
+    endif()
     qt_standard_project_setup(REQUIRES 6.6)
     qt_policy(SET QTP0004 NEW)
+
+    if(APPLE)
+        set(SOFTLOAF_TRICHROME_NATIVE_OPEN_PANEL
+            src/native_open_panel.mm
+            src/native_open_panel.hpp)
+    else()
+        set(SOFTLOAF_TRICHROME_NATIVE_OPEN_PANEL
+            src/native_open_panel_stub.cpp
+            src/native_open_panel.hpp)
+    endif()
 
     qt_add_executable(softloaf_trichrome_app
         src/main.cpp
         src/desktop_decoder.cpp
         src/desktop_decoder.hpp
+        ${SOFTLOAF_TRICHROME_NATIVE_OPEN_PANEL}
         src/obs_log.cpp
         src/obs_log.hpp
-        src/project_store.cpp
-        src/project_store.hpp
         src/trichrome_cache.cpp
         src/trichrome_cache.hpp
         src/trichrome_controller.cpp
@@ -48,10 +60,16 @@ if(SOFTLOAF_TRICHROME_BUILD_APP)
         MACOSX_BUNDLE_BUNDLE_NAME "SoftLoaf Trichrome"
         MACOSX_BUNDLE_GUI_IDENTIFIER "art.revela.softloaf-trichrome")
 
+    if(APPLE)
+        set_source_files_properties(src/native_open_panel.mm
+            PROPERTIES LANGUAGE OBJCXX COMPILE_FLAGS "-fobjc-arc")
+    endif()
+
     qt_add_qml_module(softloaf_trichrome_app
         URI SoftLoafTrichrome
         VERSION 1.0
         QML_FILES
+            qml/ExportWindow.qml
             qml/Main.qml)
 
     target_link_libraries(softloaf_trichrome_app PRIVATE
@@ -62,6 +80,7 @@ if(SOFTLOAF_TRICHROME_BUILD_APP)
         Qt6::Qml
         Qt6::Quick
         Qt6::QuickControls2
+        Qt6::QuickDialogs2
         Qt6::Widgets)
 endif()
 
@@ -80,7 +99,6 @@ if(SOFTLOAF_TRICHROME_BUILD_TESTS)
         add_executable(trichrome_desktop_core_test
             tests/trichrome_desktop_core_test.cpp
             src/obs_log.cpp
-            src/project_store.cpp
             src/trichrome_cache.cpp)
         target_include_directories(trichrome_desktop_core_test PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/src)

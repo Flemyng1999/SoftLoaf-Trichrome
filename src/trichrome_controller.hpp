@@ -26,12 +26,18 @@ class TrichromeController : public QObject {
     Q_PROPERTY(QString sensorMode READ sensorMode WRITE setSensorMode NOTIFY sensorModeChanged)
     Q_PROPERTY(QString roleOrder READ roleOrder WRITE setRoleOrder NOTIFY roleOrderChanged)
     Q_PROPERTY(QString sortMode READ sortMode WRITE setSortMode NOTIFY sortModeChanged)
-    Q_PROPERTY(QString projectPath READ projectPath NOTIFY projectPathChanged)
-    Q_PROPERTY(bool dirty READ dirty NOTIFY dirtyChanged)
     Q_PROPERTY(bool hasPreview READ hasPreview NOTIFY previewChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
+    Q_PROPERTY(int completeGroupCount READ completeGroupCount NOTIFY groupsChanged)
 
  public:
+    struct ExportSettings {
+        QString format = "tiff";
+        QString color_space = "aces_ap0_linear";
+        int bit_depth = 16;
+        int jpeg_quality = 95;
+    };
+
     explicit TrichromeController(TrichromeImageProvider* image_provider,
                                  QObject* parent = nullptr);
 
@@ -42,21 +48,21 @@ class TrichromeController : public QObject {
     QString sensorMode() const { return sensor_mode_; }
     QString roleOrder() const { return role_order_; }
     QString sortMode() const { return sort_mode_; }
-    QString projectPath() const { return project_path_; }
-    bool dirty() const { return dirty_; }
     bool hasPreview() const { return !preview_source_.isEmpty(); }
     bool busy() const { return busy_; }
+    int completeGroupCount() const { return static_cast<int>(files_.size()) / 3; }
 
-    Q_INVOKABLE void chooseFiles();
-    Q_INVOKABLE void chooseFolder();
-    Q_INVOKABLE void openProject();
-    Q_INVOKABLE void saveProject();
-    Q_INVOKABLE void saveProjectAs();
+    Q_INVOKABLE void chooseImport();
     Q_INVOKABLE void clear();
     Q_INVOKABLE void setActiveGroup(int index);
     Q_INVOKABLE void composeActive();
-    Q_INVOKABLE void exportActive();
-    Q_INVOKABLE void exportAll();
+    Q_INVOKABLE void chooseExport();
+    Q_INVOKABLE void startExport(const QUrl& folder_url,
+                                 bool export_all,
+                                 const QString& format,
+                                 const QString& color_space,
+                                 int bit_depth,
+                                 int jpeg_quality);
     Q_INVOKABLE void shutdown();
 
  public slots:
@@ -72,8 +78,6 @@ class TrichromeController : public QObject {
     void sensorModeChanged();
     void roleOrderChanged();
     void sortModeChanged();
-    void projectPathChanged();
-    void dirtyChanged();
     void busyChanged();
 
  private:
@@ -84,33 +88,33 @@ class TrichromeController : public QObject {
 
     void setStatus(QString status);
     void setBusy(bool busy);
-    void setDirty(bool dirty);
+    std::vector<std::filesystem::path> resolveImportSelection(
+        const std::vector<std::filesystem::path>& picked) const;
     void addFiles(std::vector<std::filesystem::path> paths);
     void addWorker(QThread* worker, const QString& task_name);
     void cancelAndDrainWorkers(int timeout_ms);
+    void exportActiveTo(const QString& folder, const ExportSettings& settings);
+    void exportAllTo(const QString& folder, const ExportSettings& settings);
+    void startBackgroundFrameProcessing();
     void regroup();
     void rebuildGroupModel();
     ProjectTrichromeGroup projectGroupFor(int group_index) const;
     std::vector<std::filesystem::path> pathsForGroup(int group_index) const;
     QString fileFilter() const;
     QString publishPreview(const QImage& image);
-    bool saveProjectTo(const QString& path);
-    bool loadProjectFrom(const QString& path);
-    QString projectFileFilter() const;
 
     std::vector<SourceFile> files_;
     QVariantList groups_model_;
     int active_group_ = -1;
     QString preview_source_;
     QString status_ = "No photos loaded";
-    QString sensor_mode_ = "mono";
+    QString sensor_mode_ = "bayer";
     QString role_order_ = "RGB";
     QString sort_mode_ = "filename";
-    QString project_path_;
-    bool dirty_ = false;
     bool busy_ = false;
     int preview_rev_ = 0;
     int compose_generation_ = 0;
+    int process_generation_ = 0;
     int export_generation_ = 0;
     int active_workers_ = 0;
     QImage current_preview_;

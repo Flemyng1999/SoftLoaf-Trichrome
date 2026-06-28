@@ -1,5 +1,8 @@
 #pragma once
 
+#include <array>
+#include <string>
+
 #include <opencv2/core.hpp>
 
 namespace softloaf::trichrome {
@@ -14,6 +17,9 @@ enum class ColorState {
 struct ImageBuf {
     cv::Mat data;
     ColorState state = ColorState::kCameraLinear;
+    std::string color_space = "camera_native_linear";
+    std::array<double, 9> camera_to_xyz_d50 = {};
+    bool has_camera_to_xyz_d50 = false;
 
     [[nodiscard]] bool empty() const { return data.empty(); }
     [[nodiscard]] int width() const { return data.cols; }

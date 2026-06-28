@@ -14,7 +14,9 @@ struct TrichromeCacheInput {
     std::vector<std::filesystem::path> paths;
     std::string sensor_mode;
     std::string role_order;
-    int schema_version = 1;
+    std::string decode_mode = "preview";
+    int max_edge = 2048;
+    int schema_version = 6;
 };
 
 struct CacheLookupResult {

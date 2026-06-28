@@ -1,3 +1,36 @@
-build/
+# macOS
 .DS_Store
+*.swp
+*.swo
+
+# Build outputs
+build/
+build-*/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
 compile_commands.json
+Testing/
+CTestTestfile.cmake
+
+# Qt/CMake generated files
+*_autogen/
+.qt/
+*.qmltypes
+*.aotstats
+
+# Binaries and packages
+*.app/
+*.dmg
+*.zip
+*.exe
+*.msi
+*.msix
+*.pdb
+
+# Local RAW fixtures and export scratch space
+fixtures/raw/
+raw.pixls.us/
+exports/
+*.npy

@@ -6,7 +6,16 @@
 
 namespace softloaf::trichrome::desktop {
 
-ImageBuf DecodeLinear(const std::filesystem::path& path, bool force_mono);
+enum class DecodeMode {
+    // Preview RAW decoding is pinned to LibRaw half-size/no-interpolation mode.
+    kPreview,
+    // Export RAW decoding is always full-resolution.
+    kExport,
+};
+
+ImageBuf DecodeLinear(const std::filesystem::path& path,
+                      bool force_mono,
+                      DecodeMode decode_mode);
 bool LooksLikeRaw(const std::filesystem::path& path);
 
 }  // namespace softloaf::trichrome::desktop

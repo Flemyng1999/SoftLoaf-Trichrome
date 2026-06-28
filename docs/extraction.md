@@ -17,9 +17,8 @@ core.
 - Qt/QML desktop shell for import, grouping, preview, and export.
 - LibRaw/OpenCV desktop decoder for the same import extension family as the
   parent app.
-- `.sltrichrome` project JSON persistence for source paths, ordering, grouping,
-  role order, sensor mode, and active frame.
-- Background preview/export tasks with worker drain on open, clear, and quit.
+- Session-only desktop workflow with no project-file persistence.
+- Background preview/export tasks with worker drain on clear and quit.
 - Smoke CLI and CTest target.
 
 ## Not Included Yet

@@ -7,6 +7,7 @@
 #include <system_error>
 
 #include <QDir>
+#include <QImageWriter>
 #include <QStandardPaths>
 #include <QString>
 
@@ -15,6 +16,10 @@
 
 namespace softloaf::trichrome::desktop {
 namespace {
+
+constexpr const char* kPreviewCacheExtension = ".jpg";
+constexpr const char* kPreviewCacheFormat = "JPEG";
+constexpr int kPreviewCacheJpegQuality = 92;
 
 void HashString(uint64_t* h, const std::string& value) {
     for (unsigned char c : value) detail::HashByte(h, c);
@@ -48,10 +53,12 @@ std::filesystem::path TempPathFor(const std::filesystem::path& path) {
 
 std::string TrichromePreviewCache::keyFor(const TrichromeCacheInput& input) const {
     uint64_t h = detail::kFnvOffset;
-    HashString(&h, "softloaf.trichrome.preview_cache.v1");
+    HashString(&h, "softloaf.trichrome.preview_cache.v6");
     HashUint64(&h, static_cast<uint64_t>(input.schema_version));
     HashString(&h, input.sensor_mode);
     HashString(&h, input.role_order);
+    HashString(&h, input.decode_mode);
+    HashUint64(&h, static_cast<uint64_t>(std::max(0, input.max_edge)));
     HashUint64(&h, static_cast<uint64_t>(input.paths.size()));
     for (const auto& path : input.paths) {
         const FileProbe probe = ProbeFileWithPartialHash(path);
@@ -65,7 +72,7 @@ std::string TrichromePreviewCache::keyFor(const TrichromeCacheInput& input) cons
 }
 
 std::filesystem::path TrichromePreviewCache::pathForKey(const std::string& key) const {
-    return CacheRoot() / (key + ".png");
+    return CacheRoot() / (key + kPreviewCacheExtension);
 }
 
 CacheLookupResult TrichromePreviewCache::lookup(const TrichromeCacheInput& input) const {
@@ -114,11 +121,13 @@ bool TrichromePreviewCache::write(const std::string& key, const QImage& image,
         return false;
     }
     const std::filesystem::path tmp = TempPathFor(path);
-    if (!image.save(QString::fromStdString(tmp.string()), "PNG")) {
+    QImageWriter writer(QString::fromStdString(tmp.string()), kPreviewCacheFormat);
+    writer.setQuality(kPreviewCacheJpegQuality);
+    if (!writer.write(image)) {
         if (reason_out) *reason_out = "write_failed";
         ObsLog("cache.write", {{"category", "trichrome_preview"},
                                {"result", "fail"},
-                               {"reason", "write_failed"},
+                               {"reason", writer.errorString().toStdString()},
                                {"key", key}});
         return false;
     }
@@ -137,6 +146,7 @@ bool TrichromePreviewCache::write(const std::string& key, const QImage& image,
     ObsLog("cache.write", {{"category", "trichrome_preview"},
                            {"result", "success"},
                            {"reason", "ok"},
+                           {"format", "jpeg"},
                            {"key", key}});
     return true;
 }

@@ -20,6 +20,10 @@ ApplicationWindow {
     palette.buttonText: "#f4f0e8"
     palette.highlight: "#4cbf88"
 
+    ExportWindow {
+        id: exportWindow
+    }
+
     RowLayout {
         anchors.fill: parent
         spacing: 0
@@ -55,7 +59,7 @@ ApplicationWindow {
                         }
 
                         Text {
-                            text: (trichromeController.dirty ? "Unsaved · " : "") + trichromeController.status
+                            text: trichromeController.status
                             color: "#aab2bb"
                             font.pixelSize: 13
                             elide: Text.ElideRight
@@ -77,58 +81,9 @@ ApplicationWindow {
 
                         Button {
                             Layout.fillWidth: true
-                            text: "Open"
-                            icon.name: "document-open-recent"
+                            text: "Import"
                             enabled: !trichromeController.busy
-                            onClicked: trichromeController.openProject()
-                        }
-
-                        Button {
-                            Layout.fillWidth: true
-                            text: "Save"
-                            icon.name: "document-save"
-                            enabled: !trichromeController.busy
-                            onClicked: trichromeController.saveProject()
-                        }
-                    }
-
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 8
-
-                        Button {
-                            Layout.fillWidth: true
-                            text: "Save As"
-                            icon.name: "document-save-as"
-                            enabled: !trichromeController.busy
-                            onClicked: trichromeController.saveProjectAs()
-                        }
-
-                        Button {
-                            Layout.fillWidth: true
-                            text: "Clear"
-                            icon.name: "edit-clear"
-                            enabled: !trichromeController.busy
-                            onClicked: trichromeController.clear()
-                        }
-                    }
-
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 8
-
-                        Button {
-                            Layout.fillWidth: true
-                            text: "Files"
-                            icon.name: "document-open"
-                            onClicked: trichromeController.chooseFiles()
-                        }
-
-                        Button {
-                            Layout.fillWidth: true
-                            text: "Folder"
-                            icon.name: "folder-open"
-                            onClicked: trichromeController.chooseFolder()
+                            onClicked: trichromeController.chooseImport()
                         }
                     }
 
@@ -144,18 +99,18 @@ ApplicationWindow {
 
                         Button {
                             Layout.fillWidth: true
-                            text: "Monochrome"
-                            checkable: true
-                            checked: trichromeController.sensorMode === "mono"
-                            onClicked: trichromeController.sensorMode = "mono"
-                        }
-
-                        Button {
-                            Layout.fillWidth: true
                             text: "Bayer"
                             checkable: true
                             checked: trichromeController.sensorMode === "bayer"
                             onClicked: trichromeController.sensorMode = "bayer"
+                        }
+
+                        Button {
+                            Layout.fillWidth: true
+                            text: "Monochrome"
+                            checkable: true
+                            checked: trichromeController.sensorMode === "mono"
+                            onClicked: trichromeController.sensorMode = "mono"
                         }
                     }
 
@@ -349,24 +304,9 @@ ApplicationWindow {
                     }
 
                     Button {
-                        text: "Compose"
-                        icon.name: "view-refresh"
-                        enabled: !trichromeController.busy && trichromeController.activeGroup >= 0
-                        onClicked: trichromeController.composeActive()
-                    }
-
-                    Button {
-                        text: "Export Frame"
-                        icon.name: "document-save"
+                        text: "Export"
                         enabled: trichromeController.activeGroup >= 0 && !trichromeController.busy
-                        onClicked: trichromeController.exportActive()
-                    }
-
-                    Button {
-                        text: "Export All"
-                        icon.name: "document-save-all"
-                        enabled: trichromeController.groups.length > 0 && !trichromeController.busy
-                        onClicked: trichromeController.exportAll()
+                        onClicked: exportWindow.openForExport()
                     }
                 }
             }
@@ -406,7 +346,7 @@ ApplicationWindow {
 
                     Text {
                         anchors.horizontalCenter: parent.horizontalCenter
-                        text: "Choose files or a folder, then select Monochrome or Bayer."
+                        text: "Choose files or a folder, then select Bayer or Monochrome."
                         color: "#aab2bb"
                         font.pixelSize: 14
                     }
