@@ -68,12 +68,14 @@ jobs:
           git -C "$env:SOFTLOAF_VCPKG_ROOT" checkout "$env:VCPKG_COMMIT"
           & "$env:SOFTLOAF_VCPKG_ROOT\bootstrap-vcpkg.bat" -disableMetrics
           New-Item -ItemType Directory -Force -Path "$env:VCPKG_DEFAULT_BINARY_CACHE" | Out-Null
+          "VCPKG_ROOT=$env:SOFTLOAF_VCPKG_ROOT" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Install vcpkg dependencies
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path build-windows | Out-Null
           & "$env:SOFTLOAF_VCPKG_ROOT\vcpkg.exe" install `
+            --classic `
             "libraw:x64-windows" `
             "opencv4[fs,intrinsics,jpeg,png,thread,tiff,webp]:x64-windows" `
             --x-install-root="$env:GITHUB_WORKSPACE\build-windows\vcpkg_installed"
