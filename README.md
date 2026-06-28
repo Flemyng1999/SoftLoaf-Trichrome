@@ -19,6 +19,10 @@ The C++ core also remains usable as a small library and CLI test target:
 - structure correlation diagnostics;
 - mono/Bayer role composition into RGB;
 - atomic RGB16 NPY artifact writing.
+- structured diagnostic logs;
+- latest-wins preview compose tasks;
+- content-addressed preview cache;
+- QML display handoff through an image provider.
 
 The desktop decoder supports the same import extension family as SoftLoaf
 Negative: common RAW formats (`.3fr`, `.dng`, `.arw`, `.cr2`, `.cr3`, `.nef`,
@@ -39,6 +43,9 @@ ctest --test-dir build --output-on-failure
 ```bash
 open build/softloaf_trichrome_app.app
 ```
+
+See [docs/architecture.md](docs/architecture.md) for the current log, cache,
+display, and task lifecycle boundaries.
 
 ## CLI
 

@@ -1,8 +1,10 @@
 #pragma once
 
 #include <filesystem>
+#include <atomic>
 #include <vector>
 
+#include <QImage>
 #include <QObject>
 #include <QUrl>
 #include <QVariantList>
@@ -11,6 +13,8 @@
 #include "softloaf_trichrome/model.hpp"
 
 namespace softloaf::trichrome::desktop {
+
+class TrichromeImageProvider;
 
 class TrichromeController : public QObject {
     Q_OBJECT
@@ -25,7 +29,8 @@ class TrichromeController : public QObject {
     Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
 
  public:
-    explicit TrichromeController(QObject* parent = nullptr);
+    explicit TrichromeController(TrichromeImageProvider* image_provider,
+                                 QObject* parent = nullptr);
 
     QVariantList groups() const { return groups_model_; }
     int activeGroup() const { return active_group_; }
@@ -72,7 +77,7 @@ class TrichromeController : public QObject {
     void rebuildGroupModel();
     ProjectTrichromeGroup projectGroupFor(int group_index) const;
     QString fileFilter() const;
-    QString writePreviewPng(const ImageBuf& image);
+    QString publishPreview(const QImage& image);
 
     std::vector<SourceFile> files_;
     QVariantList groups_model_;
@@ -84,6 +89,9 @@ class TrichromeController : public QObject {
     QString sort_mode_ = "filename";
     bool busy_ = false;
     int preview_rev_ = 0;
+    int compose_generation_ = 0;
+    QImage current_preview_;
+    TrichromeImageProvider* image_provider_ = nullptr;
 };
 
 }  // namespace softloaf::trichrome::desktop

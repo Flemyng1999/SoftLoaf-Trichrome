@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <memory>
 #include <string>
 
 #include <libraw/libraw.h>
@@ -55,22 +56,23 @@ ImageBuf DecodeRegularImage(const std::filesystem::path& path, bool force_mono) 
 
 ImageBuf DecodeRawImage(const std::filesystem::path& path, bool force_mono) {
     ImageBuf out;
-    LibRaw raw;
-    if (raw.open_file(path.string().c_str()) != LIBRAW_SUCCESS) return out;
-    if (raw.unpack() != LIBRAW_SUCCESS) return out;
+    // Keep LibRaw off the stack; large RAW decode paths can be stack-hungry.
+    auto raw = std::make_unique<LibRaw>();
+    if (raw->open_file(path.string().c_str()) != LIBRAW_SUCCESS) return out;
+    if (raw->unpack() != LIBRAW_SUCCESS) return out;
 
-    raw.imgdata.params.output_color = 0;
-    raw.imgdata.params.output_bps = 16;
-    raw.imgdata.params.no_auto_bright = 1;
-    raw.imgdata.params.use_auto_wb = 0;
-    raw.imgdata.params.use_camera_wb = 0;
-    raw.imgdata.params.gamm[0] = 1.0;
-    raw.imgdata.params.gamm[1] = 1.0;
-    for (float& v : raw.imgdata.params.user_mul) v = 1.0f;
+    raw->imgdata.params.output_color = 0;
+    raw->imgdata.params.output_bps = 16;
+    raw->imgdata.params.no_auto_bright = 1;
+    raw->imgdata.params.use_auto_wb = 0;
+    raw->imgdata.params.use_camera_wb = 0;
+    raw->imgdata.params.gamm[0] = 1.0;
+    raw->imgdata.params.gamm[1] = 1.0;
+    for (float& v : raw->imgdata.params.user_mul) v = 1.0f;
 
-    if (raw.dcraw_process() != LIBRAW_SUCCESS) return out;
+    if (raw->dcraw_process() != LIBRAW_SUCCESS) return out;
     int err = LIBRAW_SUCCESS;
-    libraw_processed_image_t* img = raw.dcraw_make_mem_image(&err);
+    libraw_processed_image_t* img = raw->dcraw_make_mem_image(&err);
     if (!img || err != LIBRAW_SUCCESS) return out;
 
     if (img->type == LIBRAW_IMAGE_BITMAP && img->bits == 16 && img->colors >= 1) {

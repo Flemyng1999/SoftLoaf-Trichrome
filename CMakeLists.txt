@@ -32,8 +32,14 @@ if(SOFTLOAF_TRICHROME_BUILD_APP)
         src/main.cpp
         src/desktop_decoder.cpp
         src/desktop_decoder.hpp
+        src/obs_log.cpp
+        src/obs_log.hpp
+        src/trichrome_cache.cpp
+        src/trichrome_cache.hpp
         src/trichrome_controller.cpp
-        src/trichrome_controller.hpp)
+        src/trichrome_controller.hpp
+        src/trichrome_image_provider.cpp
+        src/trichrome_image_provider.hpp)
 
     set_target_properties(softloaf_trichrome_app PROPERTIES
         MACOSX_BUNDLE TRUE
@@ -67,4 +73,18 @@ if(SOFTLOAF_TRICHROME_BUILD_TESTS)
     add_executable(trichrome_smoke tests/trichrome_smoke.cpp)
     target_link_libraries(trichrome_smoke PRIVATE softloaf_trichrome)
     add_test(NAME trichrome_smoke COMMAND trichrome_smoke)
+
+    if(SOFTLOAF_TRICHROME_BUILD_APP)
+        add_executable(trichrome_desktop_core_test
+            tests/trichrome_desktop_core_test.cpp
+            src/obs_log.cpp
+            src/trichrome_cache.cpp)
+        target_include_directories(trichrome_desktop_core_test PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/src)
+        target_link_libraries(trichrome_desktop_core_test PRIVATE
+            softloaf_trichrome
+            Qt6::Core
+            Qt6::Gui)
+        add_test(NAME trichrome_desktop_core COMMAND trichrome_desktop_core_test)
+    endif()
 endif()
