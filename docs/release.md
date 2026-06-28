@@ -197,23 +197,26 @@ Supported Windows versions are Windows 10 and Windows 11. CMake defines
 
 Recommended path:
 
-1. For `v0.1.0-alpha.1`, publish macOS only, or publish Windows as an explicit
-   unsigned tester zip.
+1. For `v0.1.0-alpha.1`, publish Windows only as explicit unsigned tester
+   artifacts.
 2. Before wider Windows release, buy an OV code-signing certificate or set up a
    cloud signing provider.
 3. Sign the app `.exe`, DLLs you ship if appropriate, and the installer/zip
    wrapper if using one. Always timestamp signatures.
 
-Future Windows package script should:
+Windows packaging is handled by `.github/workflows/release-windows.yml` and
+`tools/package_windows.ps1`. The workflow:
 
-1. configure and build Release with Visual Studio;
+1. configures and builds Release on `windows-2022` with vcpkg;
 2. run CTest;
 3. run `windeployqt`;
 4. copy OpenCV/LibRaw runtime DLLs;
-5. sign binaries with `signtool` or a cloud signer;
-6. create a zip or NSIS/Inno Setup installer;
-7. sign the installer;
-8. emit SHA256 checksums.
+5. optionally sign binaries with `signtool` when `WINDOWS_CODESIGN_PFX` and
+   `WINDOWS_CODESIGN_PASSWORD` are configured;
+6. create a portable zip and NSIS installer;
+7. optionally sign the installer;
+8. emit SHA256 checksums;
+9. optionally upload the assets to the existing GitHub release draft.
 
 Microsoft SignTool requires explicit digest parameters on modern signing
 commands:

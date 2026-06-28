@@ -1,0 +1,133 @@
+name: Release Windows
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version without the leading v
+        required: true
+        default: 0.1.0-alpha.1
+      upload_to_release:
+        description: Upload Windows assets to the existing GitHub release
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    name: Package Windows x64
+    runs-on: windows-2022
+
+    env:
+      VCPKG_COMMIT: a0400024711b283056538ac19ced80b91a83c24c
+      VCPKG_ROOT: ${{ github.workspace }}\.vcpkg
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}\.vcpkg-cache
+      VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}\.vcpkg-cache,readwrite
+      WINDOWS_CODESIGN_PFX: ${{ secrets.WINDOWS_CODESIGN_PFX }}
+      WINDOWS_CODESIGN_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_PASSWORD }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install build tools
+        shell: pwsh
+        run: |
+          choco install ninja nsis -y --no-progress
+
+      - name: Restore vcpkg binary cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+          key: windows-2022-vcpkg-${{ env.VCPKG_COMMIT }}-${{ hashFiles('vcpkg.json') }}
+          restore-keys: |
+            windows-2022-vcpkg-${{ env.VCPKG_COMMIT }}-
+
+      - name: Bootstrap vcpkg
+        shell: pwsh
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git "$env:VCPKG_ROOT"
+          git -C "$env:VCPKG_ROOT" checkout "$env:VCPKG_COMMIT"
+          & "$env:VCPKG_ROOT\bootstrap-vcpkg.bat" -disableMetrics
+          New-Item -ItemType Directory -Force -Path "$env:VCPKG_DEFAULT_BINARY_CACHE" | Out-Null
+
+      - name: Install vcpkg dependencies
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path build-windows | Out-Null
+          & "$env:VCPKG_ROOT\vcpkg.exe" install `
+            --triplet x64-windows `
+            --x-manifest-root="$env:GITHUB_WORKSPACE" `
+            --x-install-root="$env:GITHUB_WORKSPACE\build-windows\vcpkg_installed"
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          cmake -S . -B build-windows -G Ninja `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows `
+            -DVCPKG_INSTALLED_DIR="$env:GITHUB_WORKSPACE\build-windows\vcpkg_installed"
+
+      - name: Build
+        shell: pwsh
+        run: cmake --build build-windows
+
+      - name: Test
+        shell: pwsh
+        run: ctest --test-dir build-windows --output-on-failure
+
+      - name: Prepare signing certificate
+        if: ${{ env.WINDOWS_CODESIGN_PFX != '' }}
+        shell: pwsh
+        run: |
+          $certPath = Join-Path $env:RUNNER_TEMP "windows-codesign.pfx"
+          [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:WINDOWS_CODESIGN_PFX))
+          "WINDOWS_CODESIGN_PFX_PATH=$certPath" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Package installer and portable zip
+        shell: pwsh
+        run: |
+          $signArgs = @{}
+          if ($env:WINDOWS_CODESIGN_PFX_PATH) {
+            $signArgs.SignCertPath = $env:WINDOWS_CODESIGN_PFX_PATH
+            $signArgs.SignCertPassword = $env:WINDOWS_CODESIGN_PASSWORD
+          }
+
+          .\tools\package_windows.ps1 `
+            -BuildDir build-windows `
+            -InstallRoot build-windows\vcpkg_installed\x64-windows `
+            -Version "${{ inputs.version }}" `
+            -OutDir build-windows\windows_dist `
+            @signArgs
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SoftLoaf-Trichrome-${{ inputs.version }}-Windows-x64
+          path: |
+            build-windows/windows_dist/SoftLoaf-Trichrome-${{ inputs.version }}-Windows-x64-Setup.exe
+            build-windows/windows_dist/SoftLoaf-Trichrome-${{ inputs.version }}-Windows-x64-portable.zip
+            build-windows/windows_dist/SoftLoaf-Trichrome-${{ inputs.version }}-Windows-x64.sha256
+          if-no-files-found: error
+
+      - name: Upload to draft release
+        if: ${{ inputs.upload_to_release }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "v${{ inputs.version }}"
+          gh release upload $tag `
+            "build-windows/windows_dist/SoftLoaf-Trichrome-${{ inputs.version }}-Windows-x64-Setup.exe" `
+            "build-windows/windows_dist/SoftLoaf-Trichrome-${{ inputs.version }}-Windows-x64-portable.zip" `
+            "build-windows/windows_dist/SoftLoaf-Trichrome-${{ inputs.version }}-Windows-x64.sha256" `
+            --clobber
