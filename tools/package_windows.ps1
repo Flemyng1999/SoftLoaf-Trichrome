@@ -89,9 +89,9 @@ $TripletBin = Join-Path $InstallRoot "bin"
 $QtToolsDir = Join-Path $InstallRoot "tools\Qt6\bin"
 $WindeployqtCandidates = @()
 if (-not [string]::IsNullOrWhiteSpace($env:QT_ROOT_DIR)) {
-    $WindeployqtCandidates += Join-Path $env:QT_ROOT_DIR "bin\windeployqt.exe"
+    $WindeployqtCandidates += (Join-Path -Path $env:QT_ROOT_DIR -ChildPath "bin\windeployqt.exe")
 }
-$WindeployqtCandidates += Join-Path $QtToolsDir "windeployqt.exe"
+$WindeployqtCandidates += (Join-Path -Path $QtToolsDir -ChildPath "windeployqt.exe")
 $WindeployqtCommand = Get-Command windeployqt.exe -ErrorAction SilentlyContinue
 if ($WindeployqtCommand) {
     $WindeployqtCandidates += $WindeployqtCommand.Source
@@ -107,8 +107,8 @@ if (-not $Makensis) {
 }
 
 $ExeCandidates = @(
-    Join-Path $BuildDir "$Configuration\$ExeName",
-    Join-Path $BuildDir $ExeName
+    (Join-Path -Path $BuildDir -ChildPath "$Configuration\$ExeName"),
+    (Join-Path -Path $BuildDir -ChildPath $ExeName)
 )
 $BuiltExe = $ExeCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
 if (-not $BuiltExe) {
