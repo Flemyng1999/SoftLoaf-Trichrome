@@ -48,7 +48,8 @@ open build/softloaf_trichrome_app.app
 ```
 
 See [docs/architecture.md](docs/architecture.md) for the current log, cache,
-display, and task lifecycle boundaries.
+display, and task lifecycle boundaries. The working backlog lives in
+[docs/todo.md](docs/todo.md).
 
 ## CLI
 
