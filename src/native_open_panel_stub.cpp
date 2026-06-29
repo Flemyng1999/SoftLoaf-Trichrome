@@ -7,14 +7,9 @@
 #include <QPushButton>
 #include <QStringList>
 
+#include "qt_path_utils.hpp"
+
 namespace softloaf::trichrome::desktop {
-namespace {
-
-std::filesystem::path PathFromDialogString(const QString& path) {
-    return QFileInfo(path).filesystemFilePath();
-}
-
-}  // namespace
 
 std::vector<std::filesystem::path> NativeOpenFilesOrFolders(const char* title) {
     QMessageBox box;
@@ -35,12 +30,12 @@ std::vector<std::filesystem::path> NativeOpenFilesOrFolders(const char* title) {
             QString(),
             QStringLiteral("Supported images (*.3fr *.fff *.dng *.arw *.cr2 *.cr3 *.nef *.raf *.raw *.rw2 *.orf *.pef *.srw *.tif *.tiff *.jpg *.jpeg *.png);;All files (*)"));
         out.reserve(file_paths.size());
-        for (const QString& path : file_paths) out.push_back(PathFromDialogString(path));
+        for (const QString& path : file_paths) out.push_back(PathFromQString(path));
     } else if (box.clickedButton() == folder_button) {
         const QString folder = QFileDialog::getExistingDirectory(
             nullptr,
             title ? QString::fromUtf8(title) : QStringLiteral("Choose trichrome folder"));
-        if (!folder.isEmpty()) out.push_back(PathFromDialogString(folder));
+        if (!folder.isEmpty()) out.push_back(PathFromQString(folder));
     }
     return out;
 }
@@ -51,7 +46,7 @@ std::filesystem::path NativeChooseExportTarget(const char* title) {
         title ? QString::fromUtf8(title) : QStringLiteral("Choose export folder"),
         QString(),
         QFileDialog::ShowDirsOnly);
-    return folder.isEmpty() ? std::filesystem::path() : PathFromDialogString(folder);
+    return folder.isEmpty() ? std::filesystem::path() : PathFromQString(folder);
 }
 
 }  // namespace softloaf::trichrome::desktop

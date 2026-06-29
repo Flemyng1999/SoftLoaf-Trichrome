@@ -7,10 +7,13 @@
 
 #include <QCoreApplication>
 #include <QColor>
+#include <QDir>
 #include <QImage>
 #include <QStandardPaths>
+#include <QUrl>
 
 #include "obs_log.hpp"
+#include "qt_path_utils.hpp"
 #include "trichrome_cache.hpp"
 
 namespace fs = std::filesystem;
@@ -98,6 +101,23 @@ void TestPreviewCacheIdentityAndHit() {
     fs::remove_all(root, ec);
 }
 
+void TestUnicodePathUtilities() {
+    const fs::path root = fs::temp_directory_path() / "softloaf 路径 test";
+    std::error_code ec;
+    fs::remove_all(root, ec);
+    fs::create_directories(root, ec);
+    const fs::path file = root / "导出 frame 01.tiff";
+    const QString qpath = desktop::QStringFromPath(file);
+    const fs::path round_trip = desktop::PathFromQString(qpath);
+    assert(round_trip == file);
+
+    const QUrl url = QUrl::fromLocalFile(qpath);
+    assert(desktop::LocalPathFromUrl(url) == QDir::cleanPath(QDir::fromNativeSeparators(qpath)));
+    assert(desktop::WriteFileBytes(file, QByteArray("ok")));
+    assert(desktop::ReadFileBytes(file) == QByteArray("ok"));
+    fs::remove_all(root, ec);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -107,5 +127,6 @@ int main(int argc, char** argv) {
 
     TestObsLogSink();
     TestPreviewCacheIdentityAndHit();
+    TestUnicodePathUtilities();
     return 0;
 }

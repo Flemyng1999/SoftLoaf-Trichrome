@@ -126,6 +126,24 @@ endif()
 if(SOFTLOAF_TRICHROME_BUILD_TOOLS)
     add_executable(softloaf_trichrome_check tools/softloaf_trichrome_check.cpp)
     target_link_libraries(softloaf_trichrome_check PRIVATE softloaf_trichrome)
+
+    if(SOFTLOAF_TRICHROME_BUILD_APP)
+        add_executable(softloaf_raw_probe
+            tools/softloaf_raw_probe.cpp
+            src/desktop_decoder.cpp)
+        target_include_directories(softloaf_raw_probe PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/src)
+        target_link_libraries(softloaf_raw_probe PRIVATE
+            softloaf_trichrome
+            ${SOFTLOAF_LIBRAW_TARGET}
+            Qt6::Core)
+    endif()
+
+    add_executable(softloaf_rt32_compare tools/softloaf_rt32_compare.cpp)
+    target_link_libraries(softloaf_rt32_compare PRIVATE softloaf_trichrome)
+
+    add_executable(softloaf_image_stats tools/softloaf_image_stats.cpp)
+    target_link_libraries(softloaf_image_stats PRIVATE softloaf_trichrome)
 endif()
 
 if(SOFTLOAF_TRICHROME_BUILD_TESTS)

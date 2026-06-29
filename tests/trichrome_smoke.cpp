@@ -6,6 +6,7 @@
 
 #include "softloaf_trichrome/composer.hpp"
 #include "softloaf_trichrome/import.hpp"
+#include "softloaf_trichrome/raw_levels.hpp"
 #include "softloaf_trichrome/structure.hpp"
 
 namespace fs = std::filesystem;
@@ -86,6 +87,14 @@ int main() {
     const tri::StructureReport structure = tri::VerifyTrichromeStructure(
         group, [pattern](const std::string&) { return pattern; });
     assert(structure.ok);
+
+    tri::RawWhiteLevelInputs levels;
+    levels.black = 511;
+    levels.linear_max = {153, 153, 153, 153};
+    levels.maximum = 16383;
+    const auto white = tri::SelectTrustedRawWhiteLevel(levels);
+    assert(white.has_value());
+    assert(*white == 16383);
 
     fs::remove_all(root, ec);
     return 0;

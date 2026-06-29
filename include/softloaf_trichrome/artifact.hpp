@@ -128,9 +128,11 @@ inline std::filesystem::path ResolveArtifactPath(const std::filesystem::path& bu
 inline std::filesystem::path PreviewArtifactPathFor(const std::filesystem::path& full_artifact_path,
                                                     int max_edge = kPreviewArtifactMaxEdge) {
     std::filesystem::path preview = full_artifact_path;
-    preview.replace_filename(full_artifact_path.stem().string() + "_p" +
-                             std::to_string(max_edge) +
-                             full_artifact_path.extension().string());
+    std::filesystem::path filename = full_artifact_path.stem();
+    filename += "_p";
+    filename += std::to_string(max_edge);
+    filename += full_artifact_path.extension();
+    preview.replace_filename(filename);
     return preview;
 }
 

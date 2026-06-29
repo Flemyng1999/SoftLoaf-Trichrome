@@ -351,9 +351,13 @@ inline cv::Mat FloatRgbToUint16(const ImageBuf& rgb) {
 inline std::filesystem::path TempArtifactPath(const std::filesystem::path& artifact_path) {
     static std::atomic<uint64_t> counter{0};
     const auto now = std::chrono::steady_clock::now().time_since_epoch().count();
-    return artifact_path.parent_path() /
-        (artifact_path.stem().string() + ".tmp." + std::to_string(now) + "." +
-         std::to_string(counter.fetch_add(1)) + artifact_path.extension().string());
+    std::filesystem::path filename = artifact_path.stem();
+    filename += ".tmp.";
+    filename += std::to_string(now);
+    filename += ".";
+    filename += std::to_string(counter.fetch_add(1));
+    filename += artifact_path.extension();
+    return artifact_path.parent_path() / filename;
 }
 
 inline std::string NpyHeaderV1(int height, int width, int channels) {
@@ -459,7 +463,8 @@ inline ArtifactBuildResult BuildTrichromePreviewArtifact(ProjectMeta* meta,
     working.preview_max_edge = kPreviewArtifactMaxEdge;
     if (working.preview_artifact_path.empty()) {
         working.preview_artifact_path =
-            PreviewArtifactPathFor(working.artifact_path, working.preview_max_edge).string();
+            PathUtf8String(PreviewArtifactPathFor(working.artifact_path,
+                                                  working.preview_max_edge));
     }
     NormalizeRgbByChannelWhite(&preview_rgb_unnormalized,
                                cv::Vec3d(meta->trichrome_roll_white[0],

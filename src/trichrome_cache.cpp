@@ -46,8 +46,11 @@ std::filesystem::path CacheRoot() {
 
 std::filesystem::path TempPathFor(const std::filesystem::path& path) {
     const auto now = std::chrono::steady_clock::now().time_since_epoch().count();
-    return path.parent_path() / (path.stem().string() + ".tmp." +
-                                 std::to_string(now) + path.extension().string());
+    std::filesystem::path filename = path.stem();
+    filename += ".tmp.";
+    filename += std::to_string(now);
+    filename += path.extension();
+    return path.parent_path() / filename;
 }
 
 }  // namespace

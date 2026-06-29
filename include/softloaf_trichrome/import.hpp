@@ -233,7 +233,8 @@ inline std::string TrichromeImportReport::ToStableJson() const {
         const TrichromeImportGroupReport& group = groups[i];
         if (i > 0) out << ",";
         out << "{";
-        out << "\"artifactPath\":" << import_detail::JsonString(group.artifact_path.generic_string()) << ",";
+        out << "\"artifactPath\":"
+            << import_detail::JsonString(PathGenericUtf8String(group.artifact_path)) << ",";
         out << "\"groupIndex\":" << group.group_index << ",";
         out << "\"logicalFrameIndex\":" << group.logical_frame_index << ",";
         out << "\"reason\":" << import_detail::JsonString(group.reason) << ",";
@@ -380,8 +381,8 @@ class TrichromeImportService {
             std::string name = request.name;
             if (name.empty()) {
                 name = !request.folder.empty()
-                    ? request.folder.filename().string()
-                    : files.front().parent_path().filename().string();
+                    ? PathUtf8String(request.folder.filename())
+                    : PathUtf8String(files.front().parent_path().filename());
             }
             plan.recipe = MakeTrichromeInputRecipe(
                 std::move(name), request.mode, request.sensor_type, std::move(valid_groups));

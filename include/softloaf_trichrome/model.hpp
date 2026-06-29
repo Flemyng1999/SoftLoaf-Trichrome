@@ -11,6 +11,16 @@
 
 namespace softloaf::trichrome {
 
+inline std::string PathUtf8String(const std::filesystem::path& path) {
+    const auto utf8 = path.u8string();
+    return std::string(reinterpret_cast<const char*>(utf8.data()), utf8.size());
+}
+
+inline std::string PathGenericUtf8String(const std::filesystem::path& path) {
+    const auto utf8 = path.generic_u8string();
+    return std::string(reinterpret_cast<const char*>(utf8.data()), utf8.size());
+}
+
 enum class InputMode {
     kSingle,
     kRoll,
@@ -186,7 +196,7 @@ struct InputRecipe {
             meta.default_demask = "roll";
             meta.demask_active = false;
         }
-        for (const auto& p : files) meta.frames.push_back(FrameEntry{p.string()});
+        for (const auto& p : files) meta.frames.push_back(FrameEntry{PathUtf8String(p)});
         if (!trichrome_groups.empty()) {
             ProjectInputGroup pg;
             pg.mode = meta.input_mode;
@@ -202,7 +212,7 @@ struct InputRecipe {
                 out.group_index = group.group_index;
                 out.group_size = TrichromeGroupSize(group.mode);
                 out.logical_frame_index = group.logical_frame_index;
-                out.artifact_path = group.artifact_path.string();
+                out.artifact_path = PathUtf8String(group.artifact_path);
                 out.artifact_format = group.artifact_format;
                 out.artifact_sig = group.artifact_sig;
                 out.compose_algo_version = group.compose_algo_version;
@@ -213,7 +223,7 @@ struct InputRecipe {
                     for (const auto& source_path : source_group.files) {
                         ProjectTrichromeSource source;
                         source.role = TrichromeSourceRoleName(source_group.role);
-                        source.path = source_path.string();
+                        source.path = PathUtf8String(source_path);
                         out.sources.push_back(std::move(source));
                     }
                 }

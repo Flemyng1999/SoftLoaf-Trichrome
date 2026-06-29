@@ -25,9 +25,8 @@
 #include <opencv2/imgproc.hpp>
 
 #include "softloaf_trichrome/model.hpp"
+#include "softloaf_trichrome/raw_levels.hpp"
 #include "qt_path_utils.hpp"
-
-#include <QFile>
 
 namespace softloaf::trichrome::desktop {
 namespace {
@@ -84,6 +83,16 @@ void ConfigureRawDecodeParams(LibRaw* raw, DecodeMode decode_mode) {
     raw->imgdata.params.gamm[1] = 1.0;
     for (float& v : raw->imgdata.params.user_mul) v = 1.0f;
 
+    const auto& color = raw->imgdata.color;
+    const auto selected_white = softloaf::trichrome::SelectTrustedRawWhiteLevel(
+        {color.black,
+         {color.linear_max[0], color.linear_max[1],
+          color.linear_max[2], color.linear_max[3]},
+         color.maximum,
+         color.data_maximum});
+    if (selected_white)
+        raw->imgdata.params.user_sat = static_cast<int>(*selected_white);
+
     if (decode_mode == DecodeMode::kPreview) {
         raw->imgdata.params.half_size = 1;
         raw->imgdata.params.no_interpolation = 1;
@@ -91,6 +100,38 @@ void ConfigureRawDecodeParams(LibRaw* raw, DecodeMode decode_mode) {
         raw->imgdata.params.half_size = 0;
         raw->imgdata.params.no_interpolation = 0;
     }
+}
+
+void ConfigureRawRec2020Params(LibRaw* raw,
+                               DecodeMode decode_mode,
+                               bool use_camera_wb) {
+    ConfigureRawDecodeParams(raw, decode_mode);
+    raw->imgdata.params.output_color = 5;
+    raw->imgdata.params.use_camera_wb = use_camera_wb ? 1 : 0;
+    raw->imgdata.params.use_auto_wb = 0;
+}
+
+cv::Vec3f XyzToLinearRec2020(const cv::Vec3f& xyz) {
+    return {
+        static_cast<float>( 1.7166511880 * xyz[0] - 0.3556707838 * xyz[1] - 0.2533662814 * xyz[2]),
+        static_cast<float>(-0.6666843518 * xyz[0] + 1.6164812366 * xyz[1] + 0.0157685458 * xyz[2]),
+        static_cast<float>( 0.0176398574 * xyz[0] - 0.0427706133 * xyz[1] + 0.9421031212 * xyz[2]),
+    };
+}
+
+void ConvertXyzMatToLinearRec2020(cv::Mat* image) {
+    if (!image || image->empty() || image->depth() != CV_32F || image->channels() < 3)
+        return;
+    for (int y = 0; y < image->rows; ++y) {
+        auto* row = image->ptr<cv::Vec3f>(y);
+        for (int x = 0; x < image->cols; ++x)
+            row[x] = XyzToLinearRec2020(row[x]);
+    }
+}
+
+void CropRawTherapeeActiveArea(cv::Mat* image) {
+    if (!image || image->cols <= 8 || image->rows <= 8) return;
+    *image = (*image)(cv::Rect(4, 4, image->cols - 8, image->rows - 8)).clone();
 }
 
 void LimitOpenMpForPreviewDecode(DecodeMode decode_mode) {
@@ -120,9 +161,7 @@ void LimitOpenMpForPreviewDecode(DecodeMode decode_mode) {
 
 ImageBuf DecodeRegularImage(const std::filesystem::path& path, bool force_mono) {
     ImageBuf out;
-    QFile file(QStringFromPath(path));
-    if (!file.open(QIODevice::ReadOnly)) return out;
-    const QByteArray bytes = file.readAll();
+    const QByteArray bytes = ReadFileBytes(path);
     if (bytes.isEmpty()) return out;
     const auto* first = reinterpret_cast<const unsigned char*>(bytes.constData());
     std::vector<unsigned char> encoded(first, first + bytes.size());
@@ -210,6 +249,46 @@ ImageBuf DecodeRawImage(const std::filesystem::path& path,
     return out;
 }
 
+ImageBuf DecodeRawRec2020Image(const std::filesystem::path& path,
+                               DecodeMode decode_mode,
+                               bool use_camera_wb) {
+    ImageBuf out;
+    auto raw = std::make_unique<LibRaw>();
+#if defined(_WIN32)
+    if (raw->open_file(path.wstring().c_str()) != LIBRAW_SUCCESS) return out;
+#else
+    const std::string raw_path = QStringFromPath(path).toUtf8().toStdString();
+    if (raw->open_file(raw_path.c_str()) != LIBRAW_SUCCESS) return out;
+#endif
+    if (raw->unpack() != LIBRAW_SUCCESS) return out;
+    ConfigureRawRec2020Params(raw.get(), decode_mode, use_camera_wb);
+    LimitOpenMpForPreviewDecode(decode_mode);
+    if (raw->dcraw_process() != LIBRAW_SUCCESS) return out;
+
+    int err = LIBRAW_SUCCESS;
+    libraw_processed_image_t* img = raw->dcraw_make_mem_image(&err);
+    if (!img || err != LIBRAW_SUCCESS) return out;
+
+    if (img->type == LIBRAW_IMAGE_BITMAP && img->bits == 16 && img->colors >= 3) {
+        const int h = static_cast<int>(img->height);
+        const int w = static_cast<int>(img->width);
+        const int colors = static_cast<int>(img->colors);
+        cv::Mat src16(h, w, CV_MAKETYPE(CV_16U, colors), img->data);
+        cv::Mat f32;
+        src16.convertTo(f32, CV_32F, 1.0 / 65535.0);
+        std::vector<cv::Mat> channels;
+        cv::split(f32, channels);
+        cv::merge(std::vector<cv::Mat>{channels[0], channels[1], channels[2]}, out.data);
+        ConvertXyzMatToLinearRec2020(&out.data);
+        CropRawTherapeeActiveArea(&out.data);
+        out.state = ColorState::kWorkingLinear;
+        out.color_space = "rec_2020_linear";
+    }
+
+    LibRaw::dcraw_clear_mem(img);
+    return out;
+}
+
 }  // namespace
 
 bool LooksLikeRaw(const std::filesystem::path& path) {
@@ -223,6 +302,13 @@ ImageBuf DecodeLinear(const std::filesystem::path& path,
         return DecodeRawImage(path, force_mono, decode_mode);
     }
     return DecodeRegularImage(path, force_mono);
+}
+
+ImageBuf DecodeRawToLinearRec2020(const std::filesystem::path& path,
+                                  DecodeMode decode_mode,
+                                  bool use_camera_wb) {
+    if (!LooksLikeRaw(path)) return {};
+    return DecodeRawRec2020Image(path, decode_mode, use_camera_wb);
 }
 
 }  // namespace softloaf::trichrome::desktop

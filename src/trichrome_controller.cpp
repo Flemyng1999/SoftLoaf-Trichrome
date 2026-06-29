@@ -1192,7 +1192,9 @@ void TrichromeController::regroup() {
     ++process_generation_;
     if (sort_mode_ == "filename") {
         std::sort(files_.begin(), files_.end(), [](const SourceFile& a, const SourceFile& b) {
-            return a.path.filename().string() < b.path.filename().string();
+            return QString::compare(QStringFromPath(a.path.filename()),
+                                    QStringFromPath(b.path.filename()),
+                                    Qt::CaseSensitive) < 0;
         });
     } else {
         std::sort(files_.begin(), files_.end(), [](const SourceFile& a, const SourceFile& b) {
