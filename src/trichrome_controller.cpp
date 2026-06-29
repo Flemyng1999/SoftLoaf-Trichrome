@@ -30,6 +30,7 @@
 #include "desktop_decoder.hpp"
 #include "native_open_panel.hpp"
 #include "obs_log.hpp"
+#include "qt_path_utils.hpp"
 #include "softloaf_trichrome/composer.hpp"
 #include "softloaf_trichrome/raw_metadata.hpp"
 #include "trichrome_cache.hpp"
@@ -44,11 +45,11 @@ constexpr const char* kDisplayColorSpace = "srgb";
 constexpr uint64_t kGiB = 1024ull * 1024ull * 1024ull;
 
 QString BaseName(const std::filesystem::path& path) {
-    return QString::fromStdString(path.filename().string());
+    return QStringFromPath(path.filename());
 }
 
 QString PathString(const std::filesystem::path& path) {
-    return QString::fromStdString(path.string());
+    return QStringFromPath(path);
 }
 
 QString RoleName(QChar c) {
@@ -129,9 +130,8 @@ using Mat3d = std::array<double, 9>;
 
 QString NormalizeExportFormat(QString format) {
     format = format.trimmed().toLower();
-    if (format == "jpg") return "jpeg";
     if (format == "tif") return "tiff";
-    if (format == "png" || format == "jpeg" || format == "tiff") return format;
+    if (format == "dng" || format == "tiff") return format;
     return "tiff";
 }
 
@@ -171,19 +171,17 @@ QString NormalizeExportColorSpace(QString color_space) {
 }
 
 int NormalizeExportBitDepth(const QString& format, int bit_depth) {
-    if (format == "jpeg") return 8;
+    (void)format;
     return bit_depth >= 16 ? 16 : 8;
 }
 
 QByteArray ExportFormatName(const QString& format) {
-    if (format == "png") return QByteArrayLiteral("png");
-    if (format == "jpeg") return QByteArrayLiteral("jpeg");
+    (void)format;
     return QByteArrayLiteral("tiff");
 }
 
 QString ExportExtension(const QString& format) {
-    if (format == "png") return "png";
-    if (format == "jpeg") return "jpg";
+    if (format == "dng") return "dng";
     return "tiff";
 }
 
@@ -440,10 +438,6 @@ bool WriteExportImage(QImage image,
                       const TrichromeController::ExportSettings& settings,
                       QString* reason) {
     QImageWriter writer(path, ExportFormatName(settings.format));
-    if (settings.format == "jpeg")
-        writer.setQuality(std::clamp(settings.jpeg_quality, 1, 100));
-    if (settings.format == "png")
-        writer.setCompression(1);
     if (!writer.write(image)) {
         if (reason) *reason = writer.errorString();
         return false;
@@ -466,7 +460,9 @@ ComposeResult ComposeGroupSequential(const ProjectTrichromeGroup& group,
     try {
         for (const ProjectTrichromeSource& source : group.sources) {
             decoded_sources.push_back(
-                {source.role, DecodeLinear(source.path, force_mono, decode_mode)});
+                {source.role,
+                 DecodeLinear(PathFromQString(QString::fromUtf8(source.path)), force_mono,
+                              decode_mode)});
         }
     } catch (...) {
         result.reason = "compose_decode_exception";
@@ -618,15 +614,8 @@ TrichromeController::TrichromeController(TrichromeImageProvider* image_provider,
     : QObject(parent), image_provider_(image_provider) {}
 
 void TrichromeController::chooseImport() {
-    std::vector<std::filesystem::path> picked;
-#if defined(__APPLE__)
-    picked = NativeOpenFilesOrFolders("Choose trichrome photos or folder");
-#else
-    const QStringList file_paths = QFileDialog::getOpenFileNames(
-        nullptr, "Choose trichrome photos", QString(), fileFilter());
-    picked.reserve(file_paths.size());
-    for (const QString& path : file_paths) picked.emplace_back(path.toStdString());
-#endif
+    std::vector<std::filesystem::path> picked =
+        NativeOpenFilesOrFolders("Choose trichrome photos or folder");
     if (picked.empty()) return;
     const std::vector<std::filesystem::path> paths = resolveImportSelection(picked);
     if (paths.empty()) return;
@@ -768,18 +757,17 @@ void TrichromeController::composeActive() {
 }
 
 void TrichromeController::chooseExport() {
-    const QString target = QFileDialog::getExistingDirectory(nullptr, "Choose export folder");
-    if (target.isEmpty()) return;
-    exportActiveTo(target, ExportSettings{});
+    const std::filesystem::path target = NativeChooseExportTarget("Choose export folder");
+    if (target.empty()) return;
+    exportActiveTo(QStringFromPath(target), ExportSettings{});
 }
 
 void TrichromeController::startExport(const QUrl& folder_url,
                                       bool export_all,
                                       const QString& format,
                                       const QString& color_space,
-                                      int bit_depth,
-                                      int jpeg_quality) {
-    QString folder = folder_url.isLocalFile() ? folder_url.toLocalFile() : folder_url.toString();
+                                      int bit_depth) {
+    QString folder = LocalPathFromUrl(folder_url);
     if (folder.isEmpty()) {
         setStatus("Choose an export folder");
         return;
@@ -788,11 +776,14 @@ void TrichromeController::startExport(const QUrl& folder_url,
     settings.format = NormalizeExportFormat(format);
     settings.color_space = NormalizeExportColorSpace(color_space);
     settings.bit_depth = NormalizeExportBitDepth(settings.format, bit_depth);
-    settings.jpeg_quality = std::clamp(jpeg_quality, 1, 100);
     if (export_all)
         exportAllTo(folder, settings);
     else
         exportActiveTo(folder, settings);
+}
+
+QString TrichromeController::displayPath(const QUrl& url) const {
+    return LocalPathFromUrl(url);
 }
 
 void TrichromeController::exportActiveTo(const QString& folder, const ExportSettings& settings) {
@@ -1270,7 +1261,9 @@ ProjectTrichromeGroup TrichromeController::projectGroupFor(int group_index) cons
         const QChar role = role_order_[offset];
         ProjectTrichromeSource source;
         source.role = RoleName(role).toStdString();
-        source.path = files_[group_index * 3 + offset].path.string();
+        source.path = QStringFromPath(files_[group_index * 3 + offset].path)
+            .toUtf8()
+            .toStdString();
         group.sources.push_back(std::move(source));
     }
     return group;

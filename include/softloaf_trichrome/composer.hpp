@@ -510,7 +510,7 @@ inline ArtifactBuildResult BuildTrichromeFullArtifact(ProjectMeta* meta,
     ProjectTrichromeGroup working = PrepareWorkingGroup(group);
     const auto path = ResolveArtifactPath(bundle, working.artifact_path);
     const ArtifactGuardResult guard = EvaluateArtifactReadiness(
-        working, ArtifactTier::kFull, meta->trichrome_roll_white, StatFile(path.string()));
+        working, ArtifactTier::kFull, meta->trichrome_roll_white, StatFile(path));
     if (guard.ok()) {
         result.ok = true;
         result.reason = "ok";

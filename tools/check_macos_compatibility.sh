@@ -25,6 +25,32 @@ version_gt() {
 }
 
 failures=0
+link_failures=0
+frameworks_dir="${app}/Contents/Frameworks"
+executable_dir="${app}/Contents/MacOS"
+
+rpath_exists_for_dependency() {
+  local macho="$1"
+  local dep="$2"
+  local dep_tail="${dep#@rpath/}"
+  local loader_dir
+  loader_dir="$(dirname "${macho}")"
+
+  while IFS= read -r rpath; do
+    local resolved="${rpath}"
+    resolved="${resolved//@executable_path/${executable_dir}}"
+    resolved="${resolved//@loader_path/${loader_dir}}"
+    if [[ -e "${resolved}/${dep_tail}" ]]; then
+      return 0
+    fi
+  done < <(otool -l "${macho}" 2>/dev/null | awk '
+    $1 == "cmd" && $2 == "LC_RPATH" { in_rpath = 1; next }
+    in_rpath && $1 == "path" { print $2; in_rpath = 0 }
+  ')
+
+  return 1
+}
+
 while IFS= read -r -d '' f; do
   if ! file "$f" | grep -q 'Mach-O'; then
     continue
@@ -37,10 +63,33 @@ while IFS= read -r -d '' f; do
     echo "check-macos-compatibility: ${minos} > ${max_minos}: ${f}" >&2
     failures=$((failures + 1))
   fi
+
+  while IFS= read -r dep; do
+    dep_base="$(basename "${dep}")"
+    case "${dep}" in
+      /opt/homebrew/*|/usr/local/*)
+        if [[ -f "${frameworks_dir}/${dep_base}" ]]; then
+          echo "check-macos-compatibility: bundled dependency still uses absolute local path: ${f} -> ${dep}" >&2
+          link_failures=$((link_failures + 1))
+        fi
+        ;;
+      @rpath/*)
+        if [[ -f "${frameworks_dir}/${dep_base}" ]] && ! rpath_exists_for_dependency "${f}" "${dep}"; then
+          echo "check-macos-compatibility: @rpath dependency cannot resolve inside bundle: ${f} -> ${dep}" >&2
+          link_failures=$((link_failures + 1))
+        fi
+        ;;
+    esac
+  done < <(otool -L "$f" 2>/dev/null | awk 'NR > 1 { print $1 }')
 done < <(find "${app}/Contents" -type f -print0)
 
 if [[ "${failures}" -ne 0 ]]; then
   echo "check-macos-compatibility: FAIL (${failures} Mach-O files require newer macOS than ${max_minos})" >&2
+  exit 1
+fi
+
+if [[ "${link_failures}" -ne 0 ]]; then
+  echo "check-macos-compatibility: FAIL (${link_failures} bundled Mach-O dependencies do not resolve portably)" >&2
   exit 1
 fi
 

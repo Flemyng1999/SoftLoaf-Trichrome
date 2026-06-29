@@ -31,14 +31,13 @@ inline void HashBytes(uint64_t* h, const char* data, std::streamsize size) {
 }
 }  // namespace detail
 
-inline FileProbe StatFile(const std::string& path) {
+inline FileProbe StatFile(const std::filesystem::path& path) {
     FileProbe probe;
     std::error_code ec;
-    const std::filesystem::path p(path);
-    if (!std::filesystem::is_regular_file(p, ec)) return probe;
-    probe.size = std::filesystem::file_size(p, ec);
+    if (!std::filesystem::is_regular_file(path, ec)) return probe;
+    probe.size = std::filesystem::file_size(path, ec);
     if (ec) return {};
-    const auto t = std::filesystem::last_write_time(p, ec);
+    const auto t = std::filesystem::last_write_time(path, ec);
     if (ec) return {};
     probe.mtime = std::chrono::duration_cast<std::chrono::seconds>(
         t.time_since_epoch()).count();
@@ -46,7 +45,11 @@ inline FileProbe StatFile(const std::string& path) {
     return probe;
 }
 
-inline uint64_t PartialContentHash(const std::string& path, uint64_t size) {
+inline FileProbe StatFile(const std::string& path) {
+    return StatFile(std::filesystem::path(path));
+}
+
+inline uint64_t PartialContentHash(const std::filesystem::path& path, uint64_t size) {
     std::ifstream f(path, std::ios::binary);
     if (!f) return 0;
     uint64_t h = detail::kFnvOffset;
@@ -78,9 +81,13 @@ inline uint64_t PartialContentHash(const std::string& path, uint64_t size) {
     return h;
 }
 
+inline uint64_t PartialContentHash(const std::string& path, uint64_t size) {
+    return PartialContentHash(std::filesystem::path(path), size);
+}
+
 inline FileProbe ProbeFileWithPartialHash(const std::filesystem::path& path) {
-    FileProbe probe = StatFile(path.string());
-    if (probe.ok) probe.partial_hash = PartialContentHash(path.string(), probe.size);
+    FileProbe probe = StatFile(path);
+    if (probe.ok) probe.partial_hash = PartialContentHash(path, probe.size);
     return probe;
 }
 

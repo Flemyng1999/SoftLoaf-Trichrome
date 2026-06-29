@@ -47,8 +47,8 @@ release.
 - Preview composed trichrome frames in the desktop app.
 - Cache previews for faster repeat interactions.
 - Export the current frame or all complete frames.
-- Export TIFF, PNG, or JPEG.
-- Prefer 16-bit TIFF/PNG output for higher-quality handoff.
+- Export TIFF or DNG-family output.
+- Choose 8-bit or 16-bit output for handoff.
 - Select export color spaces including sRGB, Display P3, Adobe RGB, Rec.2020,
   ProPhoto RGB Linear, ACES AP0 Linear, and ACEScg/AP1 Linear.
 

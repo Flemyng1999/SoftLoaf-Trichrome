@@ -35,7 +35,6 @@ class TrichromeController : public QObject {
         QString format = "tiff";
         QString color_space = "aces_ap0_linear";
         int bit_depth = 16;
-        int jpeg_quality = 95;
     };
 
     explicit TrichromeController(TrichromeImageProvider* image_provider,
@@ -61,8 +60,8 @@ class TrichromeController : public QObject {
                                  bool export_all,
                                  const QString& format,
                                  const QString& color_space,
-                                 int bit_depth,
-                                 int jpeg_quality);
+                                 int bit_depth);
+    Q_INVOKABLE QString displayPath(const QUrl& url) const;
     Q_INVOKABLE void shutdown();
 
  public slots:

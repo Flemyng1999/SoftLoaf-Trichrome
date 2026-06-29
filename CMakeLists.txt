@@ -107,7 +107,9 @@ if(SOFTLOAF_TRICHROME_BUILD_APP)
         VERSION 1.0
         QML_FILES
             qml/ExportWindow.qml
-            qml/Main.qml)
+            qml/Main.qml
+            qml/ThemedButton.qml
+            qml/ThemedComboBox.qml)
 
     target_link_libraries(softloaf_trichrome_app PRIVATE
         softloaf_trichrome

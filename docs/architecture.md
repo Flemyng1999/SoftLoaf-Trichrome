@@ -33,7 +33,7 @@ This app follows a smaller version of the SoftLoaf Negative lifecycle model.
   and the trichrome composite enters the named working state
   `linear_srgb_trichrome` before display or export encoding.
 - Export encodes from that linear composite into named targets. The professional
-  defaults are TIFF/PNG 16-bit and large linear spaces: ACES AP0, ACEScg,
+  defaults are TIFF/DNG-family 16-bit and large linear spaces: ACES AP0, ACEScg,
   ProPhoto RGB, or Rec.2020. Legacy/display targets such as sRGB, Display P3,
   Rec.709, and Adobe RGB remain available for handoff needs.
 - ACES AP0 and ACEScg output use explicit linear-RGB matrix transforms from the
@@ -77,7 +77,7 @@ category=<name> key=value key=value
   interruption inside every long-running step, so shutdown can wait for the
   current decode to return.
 - Export has an async full-source task, explicit target color-space encoding,
-  and TIFF/PNG 8-bit or 16-bit selection. ICC metadata rigor and the upstream
+  and TIFF/DNG-family 8-bit or 16-bit selection. ICC metadata rigor and the upstream
   camera-matrix / calibrated working-space policy are not yet equivalent to
   SoftLoaf Negative export.
 - RAW-to-working-space compatibility needs a RawTherapee-informed test plan:

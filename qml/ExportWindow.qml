@@ -35,7 +35,7 @@ Window {
     function folderText() {
         if (destFolder.toString().length === 0)
             return "No export folder selected"
-        return decodeURIComponent(destFolder.toString().replace("file://", ""))
+        return trichromeController.displayPath(destFolder)
     }
 
     function startExport() {
@@ -44,8 +44,7 @@ Window {
             scopeCombo.currentIndex === 1,
             formatCombo.currentValue,
             spaceCombo.currentValue,
-            bitDepthCombo.currentValue,
-            Math.round(qualitySlider.value))
+            bitDepthCombo.currentValue)
         visible = false
     }
 
@@ -75,12 +74,11 @@ Window {
                 Layout.fillWidth: true
                 spacing: 10
                 FieldLabel { text: "Range" }
-                ComboBox {
+                ThemedComboBox {
                     id: scopeCombo
                     Layout.fillWidth: true
                     model: ["Current frame", "All complete frames"]
                     enabled: trichromeController.completeGroupCount > 1
-                    opacity: enabled ? 1.0 : 0.55
                 }
             }
 
@@ -90,15 +88,14 @@ Window {
                 Layout.fillWidth: true
                 spacing: 10
                 FieldLabel { text: "Format" }
-                ComboBox {
+                ThemedComboBox {
                     id: formatCombo
                     Layout.fillWidth: true
                     textRole: "text"
                     valueRole: "value"
                     model: [
                         { text: "TIFF", value: "tiff" },
-                        { text: "PNG", value: "png" },
-                        { text: "JPEG", value: "jpeg" }
+                        { text: "DNG", value: "dng" }
                     ]
                 }
             }
@@ -107,7 +104,7 @@ Window {
                 Layout.fillWidth: true
                 spacing: 10
                 FieldLabel { text: "Color Space" }
-                ComboBox {
+                ThemedComboBox {
                     id: spaceCombo
                     Layout.fillWidth: true
                     textRole: "text"
@@ -129,10 +126,8 @@ Window {
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 10
-                enabled: formatCombo.currentValue === "png" || formatCombo.currentValue === "tiff"
-                opacity: enabled ? 1.0 : 0.45
                 FieldLabel { text: "Bit Depth" }
-                ComboBox {
+                ThemedComboBox {
                     id: bitDepthCombo
                     Layout.fillWidth: true
                     textRole: "text"
@@ -142,30 +137,6 @@ Window {
                         { text: "8-bit", value: 8 },
                         { text: "16-bit", value: 16 }
                     ]
-                }
-            }
-
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: 10
-                enabled: formatCombo.currentValue === "jpeg"
-                opacity: enabled ? 1.0 : 0.45
-                FieldLabel { text: "JPEG Quality" }
-                Slider {
-                    id: qualitySlider
-                    Layout.fillWidth: true
-                    from: 1
-                    to: 100
-                    stepSize: 1
-                    value: 95
-                    snapMode: Slider.SnapAlways
-                }
-                Label {
-                    Layout.preferredWidth: 30
-                    text: Math.round(qualitySlider.value)
-                    color: win.cValue
-                    font.pixelSize: 12
-                    horizontalAlignment: Text.AlignRight
                 }
             }
 
@@ -189,7 +160,7 @@ Window {
                     font.pixelSize: 12
                     elide: Text.ElideMiddle
                 }
-                Button {
+                ThemedButton {
                     text: "Choose..."
                     onClicked: folderDialog.open()
                 }
@@ -199,11 +170,11 @@ Window {
                 Layout.fillWidth: true
                 spacing: 8
                 Item { Layout.fillWidth: true }
-                Button {
+                ThemedButton {
                     text: "Cancel"
                     onClicked: win.visible = false
                 }
-                Button {
+                ThemedButton {
                     text: "Start Export"
                     highlighted: true
                     enabled: win.destFolder.toString().length > 0 && !trichromeController.busy

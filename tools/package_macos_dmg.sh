@@ -57,6 +57,62 @@ fi
 echo "package-macos: using macdeployqt: ${macdeployqt}"
 "${macdeployqt}" "${app}" -verbose=1 -qmldir="${repo_root}/qml"
 
+is_macho() {
+  file "$1" | grep -q 'Mach-O'
+}
+
+add_rpath_if_missing() {
+  local path="$1"
+  local rpath="$2"
+  if ! otool -l "${path}" | awk '
+      $1 == "cmd" && $2 == "LC_RPATH" { in_rpath = 1; next }
+      in_rpath && $1 == "path" && $2 == want { found = 1 }
+      in_rpath && $1 == "cmd" { in_rpath = 0 }
+      END { exit found ? 0 : 1 }
+    ' want="${rpath}"; then
+    install_name_tool -add_rpath "${rpath}" "${path}"
+  fi
+}
+
+repair_bundled_dylib_links() {
+  local frameworks_dir="${app}/Contents/Frameworks"
+  local macos_dir="${app}/Contents/MacOS"
+  [[ -d "${frameworks_dir}" ]] || return 0
+
+  while IFS= read -r -d '' dylib; do
+    is_macho "${dylib}" || continue
+    install_name_tool -id "@rpath/$(basename "${dylib}")" "${dylib}" || true
+  done < <(find "${frameworks_dir}" -maxdepth 1 -type f -name '*.dylib' -print0)
+
+  while IFS= read -r -d '' macho; do
+    is_macho "${macho}" || continue
+    case "${macho}" in
+      "${macos_dir}"/*)
+        add_rpath_if_missing "${macho}" "@executable_path/../Frameworks"
+        ;;
+      "${frameworks_dir}"/*)
+        add_rpath_if_missing "${macho}" "@loader_path"
+        ;;
+    esac
+
+    while IFS= read -r dep; do
+      local dep_base bundled_dep
+      dep_base="$(basename "${dep}")"
+      bundled_dep="${frameworks_dir}/${dep_base}"
+      [[ -f "${bundled_dep}" ]] || continue
+      case "${dep}" in
+        /usr/lib/*|/System/Library/*|"@rpath/${dep_base}"|"@loader_path/${dep_base}"|"@executable_path/../Frameworks/${dep_base}")
+          continue
+          ;;
+      esac
+      install_name_tool -change "${dep}" "@rpath/${dep_base}" "${macho}"
+    done < <(otool -L "${macho}" | awk 'NR > 1 { print $1 }')
+  done < <(find "${app}/Contents" -type f -print0)
+}
+
+echo "package-macos: repairing bundled dylib linkage"
+repair_bundled_dylib_links
+
 sign_args=(--force --sign "${identity}")
 if [[ "${identity}" != "-" ]]; then
   sign_args+=(--options runtime --timestamp)

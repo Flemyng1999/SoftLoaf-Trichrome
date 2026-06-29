@@ -79,7 +79,7 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         spacing: 8
 
-                        Button {
+                        ThemedButton {
                             Layout.fillWidth: true
                             text: "Import"
                             enabled: !trichromeController.busy
@@ -97,7 +97,7 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         spacing: 8
 
-                        Button {
+                        ThemedButton {
                             Layout.fillWidth: true
                             text: "Bayer"
                             checkable: true
@@ -105,7 +105,7 @@ ApplicationWindow {
                             onClicked: trichromeController.sensorMode = "bayer"
                         }
 
-                        Button {
+                        ThemedButton {
                             Layout.fillWidth: true
                             text: "Monochrome"
                             checkable: true
@@ -126,7 +126,7 @@ ApplicationWindow {
                             font.pixelSize: 12
                         }
 
-                        ComboBox {
+                        ThemedComboBox {
                             Layout.fillWidth: true
                             model: [
                                 { text: "Filename", value: "filename" },
@@ -144,7 +144,7 @@ ApplicationWindow {
                             font.pixelSize: 12
                         }
 
-                        ComboBox {
+                        ThemedComboBox {
                             Layout.fillWidth: true
                             model: ["RGB", "RBG", "GRB", "GBR", "BRG", "BGR"]
                             currentIndex: model.indexOf(trichromeController.roleOrder)
@@ -303,7 +303,7 @@ ApplicationWindow {
                         visible: trichromeController.busy
                     }
 
-                    Button {
+                    ThemedButton {
                         text: "Export"
                         enabled: trichromeController.activeGroup >= 0 && !trichromeController.busy
                         onClicked: exportWindow.openForExport()

@@ -81,7 +81,7 @@ Last updated: 2026-06-28
 ### P1 - Color And Output Quality
 
 - [x] Add large-space export targets and high-bit-depth selection.
-  - Exit criteria: TIFF/PNG expose 8-bit and 16-bit choices; export defaults to
+  - Exit criteria: TIFF/DNG-family outputs expose 8-bit and 16-bit choices; export defaults to
     16-bit and offers large linear spaces rather than display-only targets.
 - [ ] Define the color pipeline.
   - Exit criteria: document source linear state, working space, display view,
@@ -96,10 +96,10 @@ Last updated: 2026-06-28
     public raw.pixls.us fixtures, excluding phones and uncommon cameras from
     the first matrix.
 - [ ] Add ICC-aware SDR export.
-  - Exit criteria: JPEG/PNG/TIFF outputs embed the correct ICC and tests verify
+  - Exit criteria: TIFF/DNG-family outputs embed the correct ICC and tests verify
     metadata for each supported output space.
 - [ ] Verify high-bit-depth export metadata.
-  - Exit criteria: 16-bit TIFF/PNG or equivalent path does not round-trip
+  - Exit criteria: 16-bit TIFF/DNG-family output does not round-trip
     through 8-bit `QImage`, and automated tests inspect the written files.
 - [ ] Add regression samples.
   - Exit criteria: a small fixture set covers mono, Bayer, missing frame,

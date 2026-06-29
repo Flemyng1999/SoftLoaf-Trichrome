@@ -6,6 +6,7 @@
 #include <cmath>
 #include <memory>
 #include <string>
+#include <vector>
 
 #if defined(_WIN32)
 #ifndef NOMINMAX
@@ -24,6 +25,9 @@
 #include <opencv2/imgproc.hpp>
 
 #include "softloaf_trichrome/model.hpp"
+#include "qt_path_utils.hpp"
+
+#include <QFile>
 
 namespace softloaf::trichrome::desktop {
 namespace {
@@ -116,7 +120,13 @@ void LimitOpenMpForPreviewDecode(DecodeMode decode_mode) {
 
 ImageBuf DecodeRegularImage(const std::filesystem::path& path, bool force_mono) {
     ImageBuf out;
-    cv::Mat input = cv::imread(path.string(), cv::IMREAD_UNCHANGED);
+    QFile file(QStringFromPath(path));
+    if (!file.open(QIODevice::ReadOnly)) return out;
+    const QByteArray bytes = file.readAll();
+    if (bytes.isEmpty()) return out;
+    const auto* first = reinterpret_cast<const unsigned char*>(bytes.constData());
+    std::vector<unsigned char> encoded(first, first + bytes.size());
+    cv::Mat input = cv::imdecode(encoded, cv::IMREAD_UNCHANGED);
     if (input.empty()) return out;
 
     cv::Mat float_img;
@@ -153,7 +163,12 @@ ImageBuf DecodeRawImage(const std::filesystem::path& path,
     ImageBuf out;
     // Keep LibRaw off the stack; large RAW decode paths can be stack-hungry.
     auto raw = std::make_unique<LibRaw>();
-    if (raw->open_file(path.string().c_str()) != LIBRAW_SUCCESS) return out;
+#if defined(_WIN32)
+    if (raw->open_file(path.wstring().c_str()) != LIBRAW_SUCCESS) return out;
+#else
+    const std::string raw_path = QStringFromPath(path).toUtf8().toStdString();
+    if (raw->open_file(raw_path.c_str()) != LIBRAW_SUCCESS) return out;
+#endif
     if (raw->unpack() != LIBRAW_SUCCESS) return out;
     out.camera_to_xyz_d50 = CameraToXyzD50(*raw, &out.has_camera_to_xyz_d50);
 

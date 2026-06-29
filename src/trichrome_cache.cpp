@@ -12,6 +12,7 @@
 #include <QString>
 
 #include "obs_log.hpp"
+#include "qt_path_utils.hpp"
 #include "softloaf_trichrome/cache_probe.hpp"
 
 namespace softloaf::trichrome::desktop {
@@ -40,7 +41,7 @@ std::string HexDigest(uint64_t h) {
 std::filesystem::path CacheRoot() {
     QString root = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
     if (root.isEmpty()) root = QDir::tempPath() + "/SoftLoafTrichromeCache";
-    return std::filesystem::path(root.toStdString()) / "preview";
+    return PathFromQString(root) / "preview";
 }
 
 std::filesystem::path TempPathFor(const std::filesystem::path& path) {
@@ -62,7 +63,7 @@ std::string TrichromePreviewCache::keyFor(const TrichromeCacheInput& input) cons
     HashUint64(&h, static_cast<uint64_t>(input.paths.size()));
     for (const auto& path : input.paths) {
         const FileProbe probe = ProbeFileWithPartialHash(path);
-        HashString(&h, path.string());
+        HashString(&h, QStringFromPath(path).toUtf8().toStdString());
         detail::HashByte(&h, probe.ok ? 1 : 0);
         HashUint64(&h, probe.size);
         HashUint64(&h, static_cast<uint64_t>(probe.mtime));
@@ -87,7 +88,7 @@ CacheLookupResult TrichromePreviewCache::lookup(const TrichromeCacheInput& input
                                 {"key", result.key}});
         return result;
     }
-    QImage image(QString::fromStdString(result.path.string()));
+    QImage image(QStringFromPath(result.path));
     if (image.isNull()) {
         result.reason = "read_error";
         ObsLog("cache.lookup", {{"category", "trichrome_preview"},
@@ -121,7 +122,7 @@ bool TrichromePreviewCache::write(const std::string& key, const QImage& image,
         return false;
     }
     const std::filesystem::path tmp = TempPathFor(path);
-    QImageWriter writer(QString::fromStdString(tmp.string()), kPreviewCacheFormat);
+    QImageWriter writer(QStringFromPath(tmp), kPreviewCacheFormat);
     writer.setQuality(kPreviewCacheJpegQuality);
     if (!writer.write(image)) {
         if (reason_out) *reason_out = "write_failed";

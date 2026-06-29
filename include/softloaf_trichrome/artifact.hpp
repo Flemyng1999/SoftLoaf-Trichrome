@@ -145,7 +145,7 @@ inline bool CanEnterNormalPipeline(const ProjectMeta& meta,
         const auto artifact_path = ResolveArtifactPath(bundle, group.preview_artifact_path);
         const ArtifactGuardResult guard = EvaluateArtifactReadiness(
             group, ArtifactTier::kPreview, meta.trichrome_roll_white,
-            StatFile(artifact_path.string()));
+            StatFile(artifact_path));
         if (!guard.ok()) {
             if (reason) *reason = guard.reason;
             return false;

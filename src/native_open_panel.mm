@@ -40,22 +40,13 @@ std::vector<std::filesystem::path> NativeOpenFilesOrFolders(const char* title) {
 std::filesystem::path NativeChooseExportTarget(const char* title) {
     @autoreleasepool {
         NSOpenPanel* panel = [NSOpenPanel openPanel];
-        panel.canChooseFiles = YES;
+        panel.canChooseFiles = NO;
         panel.canChooseDirectories = YES;
         panel.allowsMultipleSelection = NO;
         panel.canCreateDirectories = YES;
         panel.resolvesAliases = YES;
         panel.treatsFilePackagesAsDirectories = NO;
         if (title) panel.message = [NSString stringWithUTF8String:title];
-
-        if (@available(macOS 11.0, *)) {
-            NSMutableArray<UTType*>* types = [NSMutableArray array];
-            for (NSString* ext in @[ @"png", @"tif", @"tiff", @"jpg", @"jpeg" ]) {
-                UTType* type = [UTType typeWithFilenameExtension:ext];
-                if (type) [types addObject:type];
-            }
-            if (types.count > 0) panel.allowedContentTypes = types;
-        }
 
         if ([panel runModal] == NSModalResponseOK) {
             NSURL* url = panel.URL;
