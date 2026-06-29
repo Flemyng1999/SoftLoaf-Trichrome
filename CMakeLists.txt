@@ -26,6 +26,17 @@ if(WIN32)
 endif()
 
 find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs)
+find_package(lcms2 CONFIG QUIET)
+if(TARGET lcms2::lcms2)
+    set(SOFTLOAF_LCMS_TARGET lcms2::lcms2)
+elseif(TARGET lcms2)
+    set(SOFTLOAF_LCMS_TARGET lcms2)
+else()
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(LCMS2 REQUIRED IMPORTED_TARGET lcms2)
+    set(SOFTLOAF_LCMS_TARGET PkgConfig::LCMS2)
+endif()
+
 find_package(libraw CONFIG QUIET)
 if(TARGET libraw::raw)
     set(SOFTLOAF_LIBRAW_TARGET libraw::raw)
@@ -42,6 +53,14 @@ target_include_directories(softloaf_trichrome INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>)
 target_link_libraries(softloaf_trichrome INTERFACE ${OpenCV_LIBS})
+
+add_library(softloaf_trichrome_color STATIC
+    src/color_management.cpp)
+target_include_directories(softloaf_trichrome_color PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>)
+target_link_libraries(softloaf_trichrome_color PUBLIC
+    ${SOFTLOAF_LCMS_TARGET})
 
 if(SOFTLOAF_TRICHROME_BUILD_APP)
     find_package(Qt6 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2 QuickDialogs2 Widgets)
@@ -113,6 +132,7 @@ if(SOFTLOAF_TRICHROME_BUILD_APP)
 
     target_link_libraries(softloaf_trichrome_app PRIVATE
         softloaf_trichrome
+        softloaf_trichrome_color
         ${SOFTLOAF_LIBRAW_TARGET}
         Qt6::Core
         Qt6::Gui
@@ -161,6 +181,7 @@ if(SOFTLOAF_TRICHROME_BUILD_TESTS)
             ${CMAKE_CURRENT_SOURCE_DIR}/src)
         target_link_libraries(trichrome_desktop_core_test PRIVATE
             softloaf_trichrome
+            softloaf_trichrome_color
             Qt6::Core
             Qt6::Gui)
         add_test(NAME trichrome_desktop_core COMMAND trichrome_desktop_core_test)

@@ -83,7 +83,7 @@ Last updated: 2026-06-28
 - [x] Add large-space export targets and high-bit-depth selection.
   - Exit criteria: TIFF/DNG-family outputs expose 8-bit and 16-bit choices; export defaults to
     16-bit and offers large linear spaces rather than display-only targets.
-- [ ] Define the color pipeline.
+- [x] Define the color pipeline.
   - Exit criteria: document source linear state, working space, display view,
     and export encoding; preview/display remains fixed sRGB, while export uses
     named target transforms.
@@ -95,10 +95,10 @@ Last updated: 2026-06-28
     RawTherapee-style RAW handling for common film-copy cameras using
     public raw.pixls.us fixtures, excluding phones and uncommon cameras from
     the first matrix.
-- [ ] Add ICC-aware SDR export.
+- [x] Add ICC-aware SDR export.
   - Exit criteria: TIFF/DNG-family outputs embed the correct ICC and tests verify
     metadata for each supported output space.
-- [ ] Verify high-bit-depth export metadata.
+- [x] Verify high-bit-depth export metadata.
   - Exit criteria: 16-bit TIFF/DNG-family output does not round-trip
     through 8-bit `QImage`, and automated tests inspect the written files.
 - [ ] Add regression samples.

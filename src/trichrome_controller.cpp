@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <atomic>
-#include <array>
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
@@ -32,6 +31,7 @@
 #include "obs_log.hpp"
 #include "qt_path_utils.hpp"
 #include "softloaf_trichrome/composer.hpp"
+#include "softloaf_trichrome/color_management.hpp"
 #include "softloaf_trichrome/raw_metadata.hpp"
 #include "trichrome_cache.hpp"
 #include "trichrome_image_provider.hpp"
@@ -121,13 +121,6 @@ struct ExportTaskResult {
     QString status;
 };
 
-struct XyPrimary {
-    double x = 0.0;
-    double y = 0.0;
-};
-
-using Mat3d = std::array<double, 9>;
-
 QString NormalizeExportFormat(QString format) {
     format = format.trimmed().toLower();
     if (format == "tif") return "tiff";
@@ -186,14 +179,8 @@ QString ExportExtension(const QString& format) {
 }
 
 QString ExportColorSpaceLabel(const QString& color_space) {
-    if (color_space == "aces_ap0_linear") return "ACES AP0 Linear";
-    if (color_space == "acescg_linear") return "ACEScg AP1 Linear";
-    if (color_space == "prophoto_linear") return "ProPhoto RGB Linear";
-    if (color_space == "rec_2020_linear") return "Rec.2020 Linear";
-    if (color_space == "display_p3") return "Display P3";
-    if (color_space == "p3_d65_gamma_2_6") return "P3-D65 Gamma 2.6";
-    if (color_space == "rec_709") return "Rec.709 Gamma 2.4";
-    if (color_space == "adobe_rgb") return "Adobe RGB";
+    const auto* space = color::LookupColorSpace(color_space.toStdString());
+    if (space) return QString::fromUtf8(space->label.data(), static_cast<int>(space->label.size()));
     return "sRGB";
 }
 
@@ -201,151 +188,9 @@ QImage::Format ExportImageFormat(int bit_depth) {
     return bit_depth >= 16 ? QImage::Format_RGBX64 : QImage::Format_RGB888;
 }
 
-QColorSpace ExportColorSpace(const QString& color_space) {
-    if (color_space == "prophoto_linear") {
-        QColorSpace space(QColorSpace::Primaries::ProPhotoRgb,
-                          QColorSpace::TransferFunction::Linear);
-        space.setDescription(QStringLiteral("ProPhoto RGB Linear"));
-        return space;
-    }
-    if (color_space == "rec_2020_linear") {
-        QColorSpace space(QColorSpace::Primaries::Bt2020,
-                          QColorSpace::TransferFunction::Linear);
-        space.setDescription(QStringLiteral("Rec.2020 Linear"));
-        return space;
-    }
-    if (color_space == "display_p3") return QColorSpace(QColorSpace::DisplayP3);
-    if (color_space == "p3_d65_gamma_2_6") {
-        QColorSpace space(QColorSpace::Primaries::DciP3D65,
-                          QColorSpace::TransferFunction::Gamma, 2.6f);
-        space.setDescription(QStringLiteral("P3-D65 Gamma 2.6"));
-        return space;
-    }
-    if (color_space == "rec_709") {
-        QColorSpace space(QColorSpace::Primaries::SRgb,
-                          QColorSpace::TransferFunction::Gamma, 2.4f);
-        space.setDescription(QStringLiteral("Rec.709 Gamma 2.4"));
-        return space;
-    }
-    if (color_space == "adobe_rgb") return QColorSpace(QColorSpace::AdobeRgb);
-    return QColorSpace(QColorSpace::SRgb);
-}
-
-std::array<double, 3> XyzFromXy(XyPrimary p) {
-    if (std::abs(p.y) < 1e-12) return {0.0, 0.0, 0.0};
-    return {p.x / p.y, 1.0, (1.0 - p.x - p.y) / p.y};
-}
-
-Mat3d Mul(const Mat3d& a, const Mat3d& b) {
-    Mat3d out = {};
-    for (int r = 0; r < 3; ++r) {
-        for (int c = 0; c < 3; ++c) {
-            for (int k = 0; k < 3; ++k)
-                out[static_cast<size_t>(r * 3 + c)] +=
-                    a[static_cast<size_t>(r * 3 + k)] *
-                    b[static_cast<size_t>(k * 3 + c)];
-        }
-    }
-    return out;
-}
-
-std::array<double, 3> Mul(const Mat3d& m, const std::array<double, 3>& v) {
-    return {
-        m[0] * v[0] + m[1] * v[1] + m[2] * v[2],
-        m[3] * v[0] + m[4] * v[1] + m[5] * v[2],
-        m[6] * v[0] + m[7] * v[1] + m[8] * v[2],
-    };
-}
-
-Mat3d Invert(const Mat3d& m) {
-    const double det =
-        m[0] * (m[4] * m[8] - m[5] * m[7]) -
-        m[1] * (m[3] * m[8] - m[5] * m[6]) +
-        m[2] * (m[3] * m[7] - m[4] * m[6]);
-    if (std::abs(det) < 1e-12) return {};
-    const double inv_det = 1.0 / det;
-    return {
-        (m[4] * m[8] - m[5] * m[7]) * inv_det,
-        (m[2] * m[7] - m[1] * m[8]) * inv_det,
-        (m[1] * m[5] - m[2] * m[4]) * inv_det,
-        (m[5] * m[6] - m[3] * m[8]) * inv_det,
-        (m[0] * m[8] - m[2] * m[6]) * inv_det,
-        (m[2] * m[3] - m[0] * m[5]) * inv_det,
-        (m[3] * m[7] - m[4] * m[6]) * inv_det,
-        (m[1] * m[6] - m[0] * m[7]) * inv_det,
-        (m[0] * m[4] - m[1] * m[3]) * inv_det,
-    };
-}
-
-Mat3d RgbToXyzMatrix(XyPrimary white, XyPrimary red,
-                     XyPrimary green, XyPrimary blue) {
-    const auto r = XyzFromXy(red);
-    const auto g = XyzFromXy(green);
-    const auto b = XyzFromXy(blue);
-    const auto w = XyzFromXy(white);
-    const Mat3d primaries = {
-        r[0], g[0], b[0],
-        r[1], g[1], b[1],
-        r[2], g[2], b[2],
-    };
-    const std::array<double, 3> scale = Mul(Invert(primaries), w);
-    return {
-        r[0] * scale[0], g[0] * scale[1], b[0] * scale[2],
-        r[1] * scale[0], g[1] * scale[1], b[1] * scale[2],
-        r[2] * scale[0], g[2] * scale[1], b[2] * scale[2],
-    };
-}
-
-Mat3d BradfordAdaptation(XyPrimary src_white, XyPrimary dst_white) {
-    constexpr Mat3d kBradford = {
-         0.8951000,  0.2664000, -0.1614000,
-        -0.7502000,  1.7135000,  0.0367000,
-         0.0389000, -0.0685000,  1.0296000,
-    };
-    constexpr Mat3d kBradfordInv = {
-         0.9869929, -0.1470543,  0.1599627,
-         0.4323053,  0.5183603,  0.0492912,
-        -0.0085287,  0.0400428,  0.9684867,
-    };
-    const auto src_cone = Mul(kBradford, XyzFromXy(src_white));
-    const auto dst_cone = Mul(kBradford, XyzFromXy(dst_white));
-    const Mat3d scale = {
-        dst_cone[0] / src_cone[0], 0.0, 0.0,
-        0.0, dst_cone[1] / src_cone[1], 0.0,
-        0.0, 0.0, dst_cone[2] / src_cone[2],
-    };
-    return Mul(kBradfordInv, Mul(scale, kBradford));
-}
-
-Mat3d LinearSrgbToAcesMatrix(const QString& color_space) {
-    constexpr XyPrimary kD65{0.3127, 0.3290};
-    constexpr XyPrimary kD60{0.32168, 0.33767};
-    constexpr XyPrimary kSrgbRed{0.6400, 0.3300};
-    constexpr XyPrimary kSrgbGreen{0.3000, 0.6000};
-    constexpr XyPrimary kSrgbBlue{0.1500, 0.0600};
-    const Mat3d srgb_to_xyz =
-        RgbToXyzMatrix(kD65, kSrgbRed, kSrgbGreen, kSrgbBlue);
-    const Mat3d d65_to_d60 = BradfordAdaptation(kD65, kD60);
-    if (color_space == "acescg_linear") {
-        constexpr XyPrimary kAp1Red{0.7130, 0.2930};
-        constexpr XyPrimary kAp1Green{0.1650, 0.8300};
-        constexpr XyPrimary kAp1Blue{0.1280, 0.0440};
-        return Mul(Invert(RgbToXyzMatrix(kD60, kAp1Red, kAp1Green, kAp1Blue)),
-                   Mul(d65_to_d60, srgb_to_xyz));
-    }
-    constexpr XyPrimary kAp0Red{0.73470, 0.26530};
-    constexpr XyPrimary kAp0Green{0.00000, 1.00000};
-    constexpr XyPrimary kAp0Blue{0.00010, -0.07700};
-    return Mul(Invert(RgbToXyzMatrix(kD60, kAp0Red, kAp0Green, kAp0Blue)),
-               Mul(d65_to_d60, srgb_to_xyz));
-}
-
-bool UsesManualLinearAcesTransform(const QString& color_space) {
-    return color_space == "aces_ap0_linear" || color_space == "acescg_linear";
-}
-
 bool ExportCanEmbedIcc(const QString& color_space) {
-    return !UsesManualLinearAcesTransform(color_space);
+    const auto* space = color::LookupColorSpace(color_space.toStdString());
+    return space && !color::CreateIccProfile(*space).empty();
 }
 
 QString ExportEncodingLabel(const TrichromeController::ExportSettings& settings) {
@@ -367,21 +212,23 @@ uchar Quantize8(double value) {
         std::lround(std::clamp(value, 0.0, 1.0) * 255.0));
 }
 
-QImage LinearRgbToManualAcesQImage(const ImageBuf& image,
-                                   const QString& color_space,
-                                   int bit_depth) {
+QImage LinearRgbToQImage(const ImageBuf& image,
+                         const QString& color_space,
+                         int bit_depth) {
+    if (image.empty() || image.data.depth() != CV_32F || image.data.channels() != 3)
+        return {};
+
+    const auto* space = color::LookupColorSpace(color_space.toStdString());
+    if (!space) space = &color::kAcesAp0Linear;
     const QImage::Format format = ExportImageFormat(bit_depth);
     QImage out(image.width(), image.height(), format);
-    const Mat3d transform = LinearSrgbToAcesMatrix(color_space);
     for (int y = 0; y < image.height(); ++y) {
         const auto* src = image.data.ptr<cv::Vec3f>(y);
         if (format == QImage::Format_RGBX64) {
             auto* dst = reinterpret_cast<quint16*>(out.scanLine(y));
             for (int x = 0; x < image.width(); ++x) {
-                const std::array<double, 3> rgb = {
-                    src[x][0], src[x][1], src[x][2],
-                };
-                const auto encoded = Mul(transform, rgb);
+                const color::Vec3 encoded = color::ConvertLinearSrgbToEncoded(
+                    *space, {src[x][0], src[x][1], src[x][2]});
                 dst[4 * x + 0] = Quantize16(encoded[0]);
                 dst[4 * x + 1] = Quantize16(encoded[1]);
                 dst[4 * x + 2] = Quantize16(encoded[2]);
@@ -390,47 +237,23 @@ QImage LinearRgbToManualAcesQImage(const ImageBuf& image,
         } else {
             auto* dst = out.scanLine(y);
             for (int x = 0; x < image.width(); ++x) {
-                const std::array<double, 3> rgb = {
-                    src[x][0], src[x][1], src[x][2],
-                };
-                const auto encoded = Mul(transform, rgb);
+                const color::Vec3 encoded = color::ConvertLinearSrgbToEncoded(
+                    *space, {src[x][0], src[x][1], src[x][2]});
                 dst[3 * x + 0] = Quantize8(encoded[0]);
                 dst[3 * x + 1] = Quantize8(encoded[1]);
                 dst[3 * x + 2] = Quantize8(encoded[2]);
             }
         }
     }
-    return out;
-}
 
-QImage LinearRgbToQImage(const ImageBuf& image,
-                         const QString& color_space,
-                         int bit_depth) {
-    if (image.empty() || image.data.depth() != CV_32F || image.data.channels() != 3)
-        return {};
-    if (UsesManualLinearAcesTransform(color_space))
-        return LinearRgbToManualAcesQImage(image, color_space, bit_depth);
-
-    const QColorSpace target_space = ExportColorSpace(color_space);
-    QColorSpace target = target_space;
-    if (!target.isValidTarget()) target = QColorSpace(QColorSpace::SRgb);
-
-    QImage linear(image.width(), image.height(), QImage::Format_RGBX64);
-    for (int y = 0; y < image.height(); ++y) {
-        const auto* src = image.data.ptr<cv::Vec3f>(y);
-        auto* dst = reinterpret_cast<quint16*>(linear.scanLine(y));
-        for (int x = 0; x < image.width(); ++x) {
-            dst[4 * x + 0] = static_cast<quint16>(
-                std::lround(std::clamp(src[x][0], 0.0f, 1.0f) * 65535.0f));
-            dst[4 * x + 1] = static_cast<quint16>(
-                std::lround(std::clamp(src[x][1], 0.0f, 1.0f) * 65535.0f));
-            dst[4 * x + 2] = static_cast<quint16>(
-                std::lround(std::clamp(src[x][2], 0.0f, 1.0f) * 65535.0f));
-            dst[4 * x + 3] = 0xffff;
-        }
+    const std::vector<unsigned char> icc = color::CreateIccProfile(*space);
+    if (!icc.empty()) {
+        const QByteArray bytes(reinterpret_cast<const char*>(icc.data()),
+                               static_cast<int>(icc.size()));
+        const QColorSpace qt_space = QColorSpace::fromIccProfile(bytes);
+        if (qt_space.isValid()) out.setColorSpace(qt_space);
     }
-    linear.setColorSpace(QColorSpace(QColorSpace::SRgbLinear));
-    return linear.convertedToColorSpace(target, ExportImageFormat(bit_depth), Qt::AutoColor);
+    return out;
 }
 
 bool WriteExportImage(QImage image,

@@ -36,10 +36,11 @@ This app follows a smaller version of the SoftLoaf Negative lifecycle model.
   defaults are TIFF/DNG-family 16-bit and large linear spaces: ACES AP0, ACEScg,
   ProPhoto RGB, or Rec.2020. Legacy/display targets such as sRGB, Display P3,
   Rec.709, and Adobe RGB remain available for handoff needs.
-- ACES AP0 and ACEScg output use explicit linear-RGB matrix transforms from the
-  current linear trichrome state because Qt cannot represent ACES AP0 primaries
-  as a regular `QColorSpace` target. ProPhoto/Rec.2020/display targets use Qt
-  color transforms and attach the resulting `QColorSpace` where supported.
+- Export color constants are centralized in `color_management.hpp` and follow
+  the `colour-science/colour` model: xy primaries, whitepoints, normalised
+  primary matrices, Bradford chromatic adaptation, and target transfer curves.
+  TIFF-family export attaches Little CMS generated ICC profiles for all named
+  targets, including ACES AP0 and ACEScg/AP1.
 - Preview cache identity is:
 
 ```text
@@ -77,9 +78,9 @@ category=<name> key=value key=value
   interruption inside every long-running step, so shutdown can wait for the
   current decode to return.
 - Export has an async full-source task, explicit target color-space encoding,
-  and TIFF/DNG-family 8-bit or 16-bit selection. ICC metadata rigor and the upstream
-  camera-matrix / calibrated working-space policy are not yet equivalent to
-  SoftLoaf Negative export.
+  TIFF/DNG-family 8-bit or 16-bit selection, and generated ICC profiles. The
+  upstream camera-matrix / calibrated working-space policy is not yet equivalent
+  to SoftLoaf Negative export.
 - RAW-to-working-space compatibility needs a RawTherapee-informed test plan:
   camera profile lookup, white balance policy, highlight/headroom handling,
   demosaic choices, and raw.pixls.us coverage for common DSLR/mirrorless

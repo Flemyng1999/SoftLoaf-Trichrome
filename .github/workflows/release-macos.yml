@@ -91,7 +91,7 @@ jobs:
       - name: Install build tools
         run: |
           brew update
-          brew install ninja pkg-config qt opencv libraw
+          brew install ninja pkg-config qt opencv libraw little-cms2
 
       - name: Configure
         run: |

@@ -7,17 +7,22 @@
 
 #include <QCoreApplication>
 #include <QColor>
+#include <QColorSpace>
 #include <QDir>
 #include <QImage>
+#include <QImageReader>
+#include <QImageWriter>
 #include <QStandardPaths>
 #include <QUrl>
 
 #include "obs_log.hpp"
 #include "qt_path_utils.hpp"
+#include "softloaf_trichrome/color_management.hpp"
 #include "trichrome_cache.hpp"
 
 namespace fs = std::filesystem;
 namespace desktop = softloaf::trichrome::desktop;
+namespace color = softloaf::trichrome::color;
 
 namespace {
 
@@ -118,6 +123,44 @@ void TestUnicodePathUtilities() {
     fs::remove_all(root, ec);
 }
 
+void TestGeneratedIccProfilesRoundTripThroughTiff() {
+    for (const color::RgbColorSpace* space : color::kExportColorSpaces) {
+        const std::vector<unsigned char> icc = color::CreateIccProfile(*space);
+        assert(!icc.empty());
+        const QByteArray bytes(reinterpret_cast<const char*>(icc.data()),
+                               static_cast<int>(icc.size()));
+        const QColorSpace qt_space = QColorSpace::fromIccProfile(bytes);
+        assert(qt_space.isValid());
+    }
+
+    const fs::path root = fs::temp_directory_path() / "softloaf_trichrome_icc_test";
+    std::error_code ec;
+    fs::remove_all(root, ec);
+    fs::create_directories(root, ec);
+
+    const std::vector<unsigned char> icc = color::CreateIccProfile(color::kAcesCgLinear);
+    const QByteArray bytes(reinterpret_cast<const char*>(icc.data()),
+                           static_cast<int>(icc.size()));
+    const QColorSpace acescg = QColorSpace::fromIccProfile(bytes);
+    assert(acescg.isValid());
+
+    QImage image(8, 6, QImage::Format_RGBX64);
+    image.fill(QColor(25, 50, 75));
+    image.setColorSpace(acescg);
+    const QString path = desktop::QStringFromPath(root / "acescg_16bit_icc.tiff");
+    QImageWriter writer(path, QByteArrayLiteral("tiff"));
+    assert(writer.write(image));
+
+    QImageReader reader(path, QByteArrayLiteral("tiff"));
+    const QImage read = reader.read();
+    assert(!read.isNull());
+    assert(read.depth() >= 48);
+    assert(read.colorSpace().isValid());
+    assert(!read.colorSpace().iccProfile().isEmpty());
+
+    fs::remove_all(root, ec);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -128,5 +171,6 @@ int main(int argc, char** argv) {
     TestObsLogSink();
     TestPreviewCacheIdentityAndHit();
     TestUnicodePathUtilities();
+    TestGeneratedIccProfilesRoundTripThroughTiff();
     return 0;
 }

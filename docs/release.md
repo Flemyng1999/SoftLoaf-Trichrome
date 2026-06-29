@@ -43,7 +43,7 @@ Do not use dependency binaries built with a newer minimum OS for release
 artifacts. Homebrew packages installed on a newer macOS can be built with a
 newer `minos` than this app supports; those builds are acceptable for local
 development only, not for the public macOS 15+ release. Use a dependency build
-route that produces Qt/OpenCV/LibRaw binaries targeting macOS 15.0.
+route that produces Qt/OpenCV/LibRaw/Little CMS binaries targeting macOS 15.0.
 
 The formal macOS release line should build on a macOS 15 environment. GitHub
 Actions workflows must pin `runs-on: macos-15`; do not use `macos-latest` for
@@ -89,7 +89,7 @@ The package script automatically runs:
 tools/check_macos_compatibility.sh build-release/softloaf_trichrome_app.app
 ```
 
-If any Qt/OpenCV/LibRaw binary reports `minos > 15.0`, packaging fails. That
+If any Qt/OpenCV/LibRaw/Little CMS binary reports `minos > 15.0`, packaging fails. That
 means the dependency set is not suitable for the public macOS 15+ release.
 
 Notarization:
@@ -118,7 +118,7 @@ Suggested GitHub Actions secrets for a future packaging workflow:
 
 The first automated macOS release workflow should:
 
-1. install or restore Qt, OpenCV, LibRaw, and Ninja builds targeting macOS 15.0;
+1. install or restore Qt, OpenCV, LibRaw, Little CMS, and Ninja builds targeting macOS 15.0;
 2. configure and build Release with `CMAKE_OSX_DEPLOYMENT_TARGET=15.0`;
 3. run CTest;
 4. run `macdeployqt`;
@@ -250,7 +250,7 @@ signing state.
 ## Windows EXE
 
 The most convenient user-facing Windows package is a zip or installer containing
-the `.exe` plus Qt/OpenCV/LibRaw runtime files. That is simpler than MSIX for
+the `.exe` plus Qt/OpenCV/LibRaw/Little CMS runtime files. That is simpler than MSIX for
 early testers, but it has a signing tradeoff.
 
 Supported Windows versions are Windows 10 and Windows 11. CMake defines
@@ -280,12 +280,12 @@ Windows packaging is handled by `.github/workflows/release-windows.yml` and
 
 1. runs on `windows-2022`;
 2. installs pinned prebuilt Qt with `jurplel/install-qt-action`;
-3. installs OpenCV/LibRaw with the Windows-only vcpkg manifest at
+3. installs OpenCV/LibRaw/Little CMS with the Windows-only vcpkg manifest at
    `.github/vcpkg/windows/vcpkg.json`;
 4. configures and builds Release with Ninja and MSVC;
 5. runs CTest;
 6. runs `windeployqt`;
-7. copies OpenCV/LibRaw runtime DLLs;
+7. copies OpenCV/LibRaw/Little CMS runtime DLLs;
 8. optionally signs binaries with `signtool` when `WINDOWS_CODESIGN_PFX` and
    `WINDOWS_CODESIGN_PASSWORD` are configured;
 9. creates a portable zip and NSIS installer;
@@ -375,7 +375,7 @@ Recommended Store package:
 
 This repository does not yet contain a working Windows dependency bootstrap.
 Before enabling Windows CI, add a stable dependency route such as vcpkg or a
-documented Qt/OpenCV/LibRaw binary setup, then verify that RAW decoding and Qt
+documented Qt/OpenCV/LibRaw/Little CMS binary setup, then verify that RAW decoding and Qt
 deployment work on a clean Windows runner.
 
 ## Test Data

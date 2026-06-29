@@ -26,6 +26,11 @@ LibRaw license.
 Image processing uses OpenCV. OpenCV is distributed under the Apache License
 2.0.
 
+## Little CMS
+
+ICC profile generation uses Little CMS. Little CMS is distributed under the MIT
+License.
+
 ## C++ Standard Library And Platform SDKs
 
 Binary packages may also include or link against platform runtime components,
