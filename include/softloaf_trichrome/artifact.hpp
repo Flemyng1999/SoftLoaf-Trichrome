@@ -13,7 +13,7 @@
 
 namespace softloaf::trichrome {
 
-inline constexpr int kComposeAlgoVersion = 6;
+inline constexpr int kComposeAlgoVersion = 7;
 inline constexpr int kPreviewArtifactMaxEdge = 4096;
 
 enum class ArtifactTier { kPreview, kFull };

@@ -5,6 +5,8 @@
 
 #include <opencv2/core.hpp>
 
+#include "softloaf_trichrome/raw_classification.hpp"
+
 namespace softloaf::trichrome {
 
 enum class ColorState {
@@ -20,6 +22,7 @@ struct ImageBuf {
     std::string color_space = "camera_native_linear";
     std::array<double, 9> camera_to_xyz_d50 = {};
     bool has_camera_to_xyz_d50 = false;
+    RawDecodeProvenance raw_provenance;
 
     [[nodiscard]] bool empty() const { return data.empty(); }
     [[nodiscard]] int width() const { return data.cols; }

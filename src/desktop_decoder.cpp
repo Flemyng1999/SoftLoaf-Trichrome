@@ -25,6 +25,7 @@
 #include <opencv2/imgproc.hpp>
 
 #include "softloaf_trichrome/model.hpp"
+#include "softloaf_trichrome/raw_classification.hpp"
 #include "softloaf_trichrome/raw_levels.hpp"
 #include "qt_path_utils.hpp"
 
@@ -69,8 +70,10 @@ std::array<double, 9> CameraToXyzD50(const LibRaw& raw, bool* ok) {
     return m;
 }
 
-const char* DecodeModeName(DecodeMode decode_mode) {
-    return decode_mode == DecodeMode::kPreview ? "preview" : "export";
+RawDecodeMode RawDecodeModeFor(DecodeMode decode_mode) {
+    return decode_mode == DecodeMode::kPreview
+        ? RawDecodeMode::kPreview
+        : RawDecodeMode::kExport;
 }
 
 void ConfigureRawDecodeParams(LibRaw* raw, DecodeMode decode_mode) {
@@ -109,6 +112,28 @@ void ConfigureRawRec2020Params(LibRaw* raw,
     raw->imgdata.params.output_color = 5;
     raw->imgdata.params.use_camera_wb = use_camera_wb ? 1 : 0;
     raw->imgdata.params.use_auto_wb = 0;
+}
+
+bool HasXTransPattern(const LibRaw& raw) {
+    for (const auto& row : raw.imgdata.idata.xtrans) {
+        for (const char c : row) {
+            if (c != 0) return true;
+        }
+    }
+    return false;
+}
+
+RawClassificationInput RawClassificationFromLibRaw(const LibRaw& raw) {
+    return {
+        raw.imgdata.idata.filters,
+        raw.imgdata.idata.colors,
+        raw.imgdata.idata.is_foveon != 0,
+        HasXTransPattern(raw),
+        raw.imgdata.rawdata.color3_image != nullptr,
+        raw.imgdata.rawdata.color4_image != nullptr,
+        raw.imgdata.rawdata.float3_image != nullptr,
+        raw.imgdata.rawdata.float4_image != nullptr,
+    };
 }
 
 cv::Vec3f XyzToLinearRec2020(const cv::Vec3f& xyz) {
@@ -209,6 +234,13 @@ ImageBuf DecodeRawImage(const std::filesystem::path& path,
     if (raw->open_file(raw_path.c_str()) != LIBRAW_SUCCESS) return out;
 #endif
     if (raw->unpack() != LIBRAW_SUCCESS) return out;
+    const RawSensorClass raw_class =
+        ClassifyRawSensor(RawClassificationFromLibRaw(*raw));
+    const RawLinearRec2020Policy rec2020_policy =
+        LinearRec2020PolicyFor(raw_class);
+    if (!RawDecodePolicyAllowsTarget(rec2020_policy,
+                                     RawDecodeTarget::kCameraNativeLinear))
+        return out;
     out.camera_to_xyz_d50 = CameraToXyzD50(*raw, &out.has_camera_to_xyz_d50);
 
     ConfigureRawDecodeParams(raw.get(), decode_mode);
@@ -242,7 +274,12 @@ ImageBuf DecodeRawImage(const std::filesystem::path& path,
             }
         }
         out.state = ColorState::kCameraLinear;
-        out.color_space = std::string("camera_native_linear_") + DecodeModeName(decode_mode);
+        out.raw_provenance = MakeRawDecodeProvenance(
+            raw_class, RawDecodeModeFor(decode_mode),
+            RawDecodeTarget::kCameraNativeLinear);
+        out.color_space = std::string("camera_native_linear_") +
+            RawDecodeModeName(out.raw_provenance.decode_mode) + "_" + RawSensorClassName(raw_class) +
+            "_" + RawLinearRec2020PolicyName(rec2020_policy);
     }
 
     LibRaw::dcraw_clear_mem(img);
@@ -261,6 +298,11 @@ ImageBuf DecodeRawRec2020Image(const std::filesystem::path& path,
     if (raw->open_file(raw_path.c_str()) != LIBRAW_SUCCESS) return out;
 #endif
     if (raw->unpack() != LIBRAW_SUCCESS) return out;
+    const RawSensorClass raw_class =
+        ClassifyRawSensor(RawClassificationFromLibRaw(*raw));
+    if (!RawDecodePolicyAllowsTarget(LinearRec2020PolicyFor(raw_class),
+                                     RawDecodeTarget::kLinearRec2020))
+        return out;
     ConfigureRawRec2020Params(raw.get(), decode_mode, use_camera_wb);
     LimitOpenMpForPreviewDecode(decode_mode);
     if (raw->dcraw_process() != LIBRAW_SUCCESS) return out;
@@ -283,6 +325,9 @@ ImageBuf DecodeRawRec2020Image(const std::filesystem::path& path,
         CropRawTherapeeActiveArea(&out.data);
         out.state = ColorState::kWorkingLinear;
         out.color_space = "rec_2020_linear";
+        out.raw_provenance = MakeRawDecodeProvenance(
+            raw_class, RawDecodeModeFor(decode_mode),
+            RawDecodeTarget::kLinearRec2020);
     }
 
     LibRaw::dcraw_clear_mem(img);
@@ -309,6 +354,40 @@ ImageBuf DecodeRawToLinearRec2020(const std::filesystem::path& path,
                                   bool use_camera_wb) {
     if (!LooksLikeRaw(path)) return {};
     return DecodeRawRec2020Image(path, decode_mode, use_camera_wb);
+}
+
+RawProvenanceProbeResult ProbeRawProvenance(const std::filesystem::path& path,
+                                            DecodeMode decode_mode,
+                                            RawDecodeTarget target) {
+    RawProvenanceProbeResult result;
+    if (!LooksLikeRaw(path)) {
+        result.reason = "not_raw_extension";
+        return result;
+    }
+    auto raw = std::make_unique<LibRaw>();
+#if defined(_WIN32)
+    if (raw->open_file(path.wstring().c_str()) != LIBRAW_SUCCESS) {
+        result.reason = "raw_open_failed";
+        return result;
+    }
+#else
+    const std::string raw_path = QStringFromPath(path).toUtf8().toStdString();
+    if (raw->open_file(raw_path.c_str()) != LIBRAW_SUCCESS) {
+        result.reason = "raw_open_failed";
+        return result;
+    }
+#endif
+    if (raw->unpack() != LIBRAW_SUCCESS) {
+        result.reason = "raw_unpack_failed";
+        return result;
+    }
+    const RawSensorClass raw_class =
+        ClassifyRawSensor(RawClassificationFromLibRaw(*raw));
+    result.provenance = MakeRawDecodeProvenance(
+        raw_class, RawDecodeModeFor(decode_mode), target);
+    result.reason = RawDecodePolicyTargetReason(result.provenance.policy, target);
+    result.ok = result.reason == "ok";
+    return result;
 }
 
 }  // namespace softloaf::trichrome::desktop

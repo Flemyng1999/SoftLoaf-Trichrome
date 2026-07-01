@@ -22,11 +22,13 @@
 #include <QImageWriter>
 #include <QMetaObject>
 #include <QPointer>
+#include <QSet>
 #include <QThread>
 
 #include <opencv2/imgproc.hpp>
 
 #include "desktop_decoder.hpp"
+#include "export_naming.hpp"
 #include "native_open_panel.hpp"
 #include "obs_log.hpp"
 #include "qt_path_utils.hpp"
@@ -118,6 +120,7 @@ struct ExportTaskResult {
     int generation = 0;
     bool ok = false;
     int exported = 0;
+    int total = 0;
     QString status;
 };
 
@@ -589,7 +592,8 @@ void TrichromeController::startExport(const QUrl& folder_url,
                                       bool export_all,
                                       const QString& format,
                                       const QString& color_space,
-                                      int bit_depth) {
+                                      int bit_depth,
+                                      const QString& name_suffix) {
     QString folder = LocalPathFromUrl(folder_url);
     if (folder.isEmpty()) {
         setStatus("Choose an export folder");
@@ -599,6 +603,7 @@ void TrichromeController::startExport(const QUrl& folder_url,
     settings.format = NormalizeExportFormat(format);
     settings.color_space = NormalizeExportColorSpace(color_space);
     settings.bit_depth = NormalizeExportBitDepth(settings.format, bit_depth);
+    settings.name_suffix = NormalizeExportNameSuffix(name_suffix);
     if (export_all)
         exportAllTo(folder, settings);
     else
@@ -610,17 +615,25 @@ QString TrichromeController::displayPath(const QUrl& url) const {
 }
 
 void TrichromeController::exportActiveTo(const QString& folder, const ExportSettings& settings) {
-    if (active_group_ < 0 || active_group_ * 3 + 2 >= static_cast<int>(files_.size())) return;
+    if (active_group_ < 0 || active_group_ * 3 + 2 >= static_cast<int>(files_.size())) {
+        setExportProgress(false, 0, 0, {});
+        return;
+    }
     const std::vector<std::filesystem::path> active_paths = pathsForGroup(active_group_);
     for (const auto& path : active_paths) {
         if (!PathExists(path)) {
+            setExportProgress(false, 0, 0, {});
             setStatus("Resolve missing sources before export");
             return;
         }
     }
-    if (folder.isEmpty()) return;
+    if (folder.isEmpty()) {
+        setExportProgress(false, 0, 0, {});
+        return;
+    }
     QDir dir(folder);
     if (!dir.exists() && !dir.mkpath(".")) {
+        setExportProgress(false, 0, 0, {});
         setStatus("Could not create export folder");
         return;
     }
@@ -634,6 +647,8 @@ void TrichromeController::exportActiveTo(const QString& folder, const ExportSett
                                 {"bit_depth", std::to_string(settings.bit_depth)},
                                 {"icc", ExportCanEmbedIcc(settings.color_space) ? "embedded" : "none"},
                                 {"color_space", settings.color_space.toStdString()}});
+    setExportProgress(true, 0, 1, QString("Exporting frame %1/1...").arg(group_index + 1));
+    setStatus(export_progress_text_);
     setBusy(true);
     QPointer<TrichromeController> self(this);
     QThread* worker = QThread::create([self, generation, group, group_index,
@@ -648,23 +663,32 @@ void TrichromeController::exportActiveTo(const QString& folder, const ExportSett
                                 {"color_space", settings.color_space.toStdString()}});
         ExportTaskResult result;
         result.generation = generation;
+        result.total = 1;
         QString reason;
+        const QString out = UniqueExportPathForGroup(
+            folder, group, ExportExtension(settings.format), settings.name_suffix);
         const QImage image = ComposeGroupToEncodedImage(
             group, sensor_mode, DecodeMode::kExport, 0,
             settings.color_space, settings.bit_depth, &reason);
-        const QString out = QDir(folder).filePath(
-            QString("trichrome_frame_%1.%2")
-                .arg(group_index + 1, 4, 10, QLatin1Char('0'))
-                .arg(ExportExtension(settings.format)));
         if (image.isNull()) {
             result.status = reason;
-        } else if (!WriteExportImage(image, out, settings, &reason)) {
-            result.status = "Export failed: " + reason;
         } else {
-            result.ok = true;
-            result.exported = 1;
-            result.status = QString("Exported %1 (%2)")
-                .arg(QFileInfo(out).fileName(), ExportEncodingLabel(settings));
+            if (self) {
+                const QString file_name = QFileInfo(out).fileName();
+                QMetaObject::invokeMethod(self, [self, generation, file_name]() {
+                    if (!self || generation != self->export_generation_) return;
+                    self->setExportProgress(true, 0, 1, QString("Writing %1...").arg(file_name));
+                    self->setStatus(self->export_progress_text_);
+                }, Qt::QueuedConnection);
+            }
+            if (!WriteExportImage(image, out, settings, &reason)) {
+                result.status = "Export failed: " + reason;
+            } else {
+                result.ok = true;
+                result.exported = 1;
+                result.status = QString("Exported %1 (%2)")
+                    .arg(QFileInfo(out).fileName(), ExportEncodingLabel(settings));
+            }
         }
         if (!self) return;
         QMetaObject::invokeMethod(self, [self, result = std::move(result)]() {
@@ -674,6 +698,8 @@ void TrichromeController::exportActiveTo(const QString& folder, const ExportSett
                                            {"generation", std::to_string(result.generation)}});
                 return;
             }
+            self->setExportProgress(false, result.ok ? result.exported : 0,
+                                    result.total, result.status);
             self->setStatus(result.status);
             ObsLog("task.finished", {{"task", "ExportFrame"},
                                      {"generation", std::to_string(result.generation)},
@@ -687,18 +713,26 @@ void TrichromeController::exportActiveTo(const QString& folder, const ExportSett
 
 void TrichromeController::exportAllTo(const QString& folder, const ExportSettings& settings) {
     const int complete_groups = static_cast<int>(files_.size()) / 3;
-    if (complete_groups <= 0) return;
+    if (complete_groups <= 0) {
+        setExportProgress(false, 0, 0, {});
+        return;
+    }
     for (int i = 0; i < complete_groups; ++i) {
         for (const auto& path : pathsForGroup(i)) {
             if (!PathExists(path)) {
+                setExportProgress(false, 0, 0, {});
                 setStatus("Resolve missing sources before export");
                 return;
             }
         }
     }
-    if (folder.isEmpty()) return;
+    if (folder.isEmpty()) {
+        setExportProgress(false, 0, 0, {});
+        return;
+    }
     QDir dir(folder);
     if (!dir.exists() && !dir.mkpath(".")) {
+        setExportProgress(false, 0, 0, {});
         setStatus("Could not create export folder");
         return;
     }
@@ -713,6 +747,9 @@ void TrichromeController::exportAllTo(const QString& folder, const ExportSetting
                                 {"bit_depth", std::to_string(settings.bit_depth)},
                                 {"icc", ExportCanEmbedIcc(settings.color_space) ? "embedded" : "none"},
                                 {"color_space", settings.color_space.toStdString()}});
+    setExportProgress(true, 0, complete_groups,
+                      QString("Exporting frame 1/%1...").arg(complete_groups));
+    setStatus(export_progress_text_);
     setBusy(true);
     QPointer<TrichromeController> self(this);
     QThread* worker = QThread::create([self, generation, groups = std::move(groups),
@@ -727,8 +764,24 @@ void TrichromeController::exportAllTo(const QString& folder, const ExportSetting
                                 {"color_space", settings.color_space.toStdString()}});
         ExportTaskResult result;
         result.generation = generation;
+        result.total = static_cast<int>(groups.size());
+        QSet<QString> reserved_paths;
         for (size_t i = 0; i < groups.size(); ++i) {
+            if (self) {
+                const int frame = static_cast<int>(i) + 1;
+                const int total = static_cast<int>(groups.size());
+                QMetaObject::invokeMethod(self, [self, generation, frame, total]() {
+                    if (!self || generation != self->export_generation_) return;
+                    self->setExportProgress(
+                        true, frame - 1, total,
+                        QString("Exporting frame %1/%2...").arg(frame).arg(total));
+                    self->setStatus(self->export_progress_text_);
+                }, Qt::QueuedConnection);
+            }
             QString reason;
+            const QString out = UniqueExportPathForGroup(
+                folder, groups[i], ExportExtension(settings.format),
+                settings.name_suffix, &reserved_paths);
             const QImage image = ComposeGroupToEncodedImage(
                 groups[i], sensor_mode, DecodeMode::kExport, 0,
                 settings.color_space, settings.bit_depth, &reason);
@@ -736,15 +789,34 @@ void TrichromeController::exportAllTo(const QString& folder, const ExportSetting
                 result.status = QString("Frame %1: %2").arg(i + 1).arg(reason);
                 break;
             }
-            const QString out = QDir(folder).filePath(
-                QString("trichrome_frame_%1.%2")
-                    .arg(static_cast<int>(i) + 1, 4, 10, QLatin1Char('0'))
-                    .arg(ExportExtension(settings.format)));
+            if (self) {
+                const int frame = static_cast<int>(i) + 1;
+                const int total = static_cast<int>(groups.size());
+                const QString file_name = QFileInfo(out).fileName();
+                QMetaObject::invokeMethod(self, [self, generation, frame, total, file_name]() {
+                    if (!self || generation != self->export_generation_) return;
+                    self->setExportProgress(
+                        true, frame - 1, total,
+                        QString("Writing %1 (%2/%3)...").arg(file_name).arg(frame).arg(total));
+                    self->setStatus(self->export_progress_text_);
+                }, Qt::QueuedConnection);
+            }
             if (!WriteExportImage(image, out, settings, &reason)) {
                 result.status = QString("Frame %1 export failed: %2").arg(i + 1).arg(reason);
                 break;
             }
             ++result.exported;
+            if (self) {
+                const int exported = result.exported;
+                const int total = static_cast<int>(groups.size());
+                QMetaObject::invokeMethod(self, [self, generation, exported, total]() {
+                    if (!self || generation != self->export_generation_) return;
+                    self->setExportProgress(
+                        true, exported, total,
+                        QString("Exported %1/%2 frames").arg(exported).arg(total));
+                    self->setStatus(self->export_progress_text_);
+                }, Qt::QueuedConnection);
+            }
         }
         result.ok = result.exported == static_cast<int>(groups.size());
         if (result.ok)
@@ -759,6 +831,7 @@ void TrichromeController::exportAllTo(const QString& folder, const ExportSetting
                                            {"generation", std::to_string(result.generation)}});
                 return;
             }
+            self->setExportProgress(false, result.exported, result.total, result.status);
             self->setStatus(result.status);
             ObsLog("task.finished", {{"task", "ExportAll"},
                                      {"generation", std::to_string(result.generation)},
@@ -809,6 +882,26 @@ void TrichromeController::setBusy(bool busy) {
     emit busyChanged();
 }
 
+void TrichromeController::setExportProgress(bool exporting,
+                                            int current,
+                                            int total,
+                                            QString text) {
+    current = std::max(0, current);
+    total = std::max(0, total);
+    if (total > 0) current = std::min(current, total);
+    if (exporting_ == exporting &&
+        export_progress_current_ == current &&
+        export_progress_total_ == total &&
+        export_progress_text_ == text) {
+        return;
+    }
+    exporting_ = exporting;
+    export_progress_current_ = current;
+    export_progress_total_ = total;
+    export_progress_text_ = std::move(text);
+    emit exportProgressChanged();
+}
+
 void TrichromeController::addFiles(std::vector<std::filesystem::path> paths) {
     bool changed = false;
     for (std::filesystem::path& path : paths) {
@@ -846,6 +939,7 @@ void TrichromeController::cancelAndDrainWorkers(int timeout_ms) {
     ++compose_generation_;
     ++process_generation_;
     ++export_generation_;
+    setExportProgress(false, 0, 0, {});
     ObsLog("worker.drain", {{"event", "start"},
                             {"active", std::to_string(active_workers_)}});
     const auto snapshot = workers_;

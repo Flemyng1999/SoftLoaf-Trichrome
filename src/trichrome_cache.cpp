@@ -57,11 +57,13 @@ std::filesystem::path TempPathFor(const std::filesystem::path& path) {
 
 std::string TrichromePreviewCache::keyFor(const TrichromeCacheInput& input) const {
     uint64_t h = detail::kFnvOffset;
-    HashString(&h, "softloaf.trichrome.preview_cache.v6");
+    HashString(&h, "softloaf.trichrome.preview_cache.v7");
     HashUint64(&h, static_cast<uint64_t>(input.schema_version));
     HashString(&h, input.sensor_mode);
     HashString(&h, input.role_order);
     HashString(&h, input.decode_mode);
+    HashString(&h, input.raw_decode_policy);
+    HashString(&h, input.raw_provenance_identity);
     HashUint64(&h, static_cast<uint64_t>(std::max(0, input.max_edge)));
     HashUint64(&h, static_cast<uint64_t>(input.paths.size()));
     for (const auto& path : input.paths) {

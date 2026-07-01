@@ -28,6 +28,10 @@ class TrichromeController : public QObject {
     Q_PROPERTY(QString sortMode READ sortMode WRITE setSortMode NOTIFY sortModeChanged)
     Q_PROPERTY(bool hasPreview READ hasPreview NOTIFY previewChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
+    Q_PROPERTY(bool exporting READ exporting NOTIFY exportProgressChanged)
+    Q_PROPERTY(int exportProgressCurrent READ exportProgressCurrent NOTIFY exportProgressChanged)
+    Q_PROPERTY(int exportProgressTotal READ exportProgressTotal NOTIFY exportProgressChanged)
+    Q_PROPERTY(QString exportProgressText READ exportProgressText NOTIFY exportProgressChanged)
     Q_PROPERTY(int completeGroupCount READ completeGroupCount NOTIFY groupsChanged)
 
  public:
@@ -35,6 +39,7 @@ class TrichromeController : public QObject {
         QString format = "tiff";
         QString color_space = "aces_ap0_linear";
         int bit_depth = 16;
+        QString name_suffix = "_rgb";
     };
 
     explicit TrichromeController(TrichromeImageProvider* image_provider,
@@ -49,6 +54,10 @@ class TrichromeController : public QObject {
     QString sortMode() const { return sort_mode_; }
     bool hasPreview() const { return !preview_source_.isEmpty(); }
     bool busy() const { return busy_; }
+    bool exporting() const { return exporting_; }
+    int exportProgressCurrent() const { return export_progress_current_; }
+    int exportProgressTotal() const { return export_progress_total_; }
+    QString exportProgressText() const { return export_progress_text_; }
     int completeGroupCount() const { return static_cast<int>(files_.size()) / 3; }
 
     Q_INVOKABLE void chooseImport();
@@ -60,7 +69,8 @@ class TrichromeController : public QObject {
                                  bool export_all,
                                  const QString& format,
                                  const QString& color_space,
-                                 int bit_depth);
+                                 int bit_depth,
+                                 const QString& name_suffix);
     Q_INVOKABLE QString displayPath(const QUrl& url) const;
     Q_INVOKABLE void shutdown();
 
@@ -78,6 +88,7 @@ class TrichromeController : public QObject {
     void roleOrderChanged();
     void sortModeChanged();
     void busyChanged();
+    void exportProgressChanged();
 
  private:
     struct SourceFile {
@@ -87,6 +98,7 @@ class TrichromeController : public QObject {
 
     void setStatus(QString status);
     void setBusy(bool busy);
+    void setExportProgress(bool exporting, int current, int total, QString text);
     std::vector<std::filesystem::path> resolveImportSelection(
         const std::vector<std::filesystem::path>& picked) const;
     void addFiles(std::vector<std::filesystem::path> paths);
@@ -111,6 +123,10 @@ class TrichromeController : public QObject {
     QString role_order_ = "RGB";
     QString sort_mode_ = "filename";
     bool busy_ = false;
+    bool exporting_ = false;
+    int export_progress_current_ = 0;
+    int export_progress_total_ = 0;
+    QString export_progress_text_;
     int preview_rev_ = 0;
     int compose_generation_ = 0;
     int process_generation_ = 0;

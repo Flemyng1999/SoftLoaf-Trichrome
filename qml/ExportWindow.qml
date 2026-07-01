@@ -44,8 +44,8 @@ Window {
             scopeCombo.currentIndex === 1,
             formatCombo.currentValue,
             spaceCombo.currentValue,
-            bitDepthCombo.currentValue)
-        visible = false
+            bitDepthCombo.currentValue,
+            suffixField.text)
     }
 
     FolderDialog {
@@ -78,7 +78,8 @@ Window {
                     id: scopeCombo
                     Layout.fillWidth: true
                     model: ["Current frame", "All complete frames"]
-                    enabled: trichromeController.completeGroupCount > 1
+                    enabled: trichromeController.completeGroupCount > 1 &&
+                        !trichromeController.exporting
                 }
             }
 
@@ -91,6 +92,7 @@ Window {
                 ThemedComboBox {
                     id: formatCombo
                     Layout.fillWidth: true
+                    enabled: !trichromeController.exporting
                     textRole: "text"
                     valueRole: "value"
                     model: [
@@ -107,6 +109,7 @@ Window {
                 ThemedComboBox {
                     id: spaceCombo
                     Layout.fillWidth: true
+                    enabled: !trichromeController.exporting
                     textRole: "text"
                     valueRole: "value"
                     model: [
@@ -130,6 +133,7 @@ Window {
                 ThemedComboBox {
                     id: bitDepthCombo
                     Layout.fillWidth: true
+                    enabled: !trichromeController.exporting
                     textRole: "text"
                     valueRole: "value"
                     currentIndex: 1
@@ -137,6 +141,28 @@ Window {
                         { text: "8-bit", value: 8 },
                         { text: "16-bit", value: 16 }
                     ]
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 10
+                FieldLabel { text: "Suffix" }
+                TextField {
+                    id: suffixField
+                    Layout.fillWidth: true
+                    enabled: !trichromeController.exporting
+                    text: "_rgb"
+                    selectByMouse: true
+                    color: win.cValue
+                    selectionColor: "#4cbf88"
+                    selectedTextColor: "#07110c"
+                    font.pixelSize: 13
+                    background: Rectangle {
+                        color: "#171a1d"
+                        border.color: suffixField.activeFocus ? "#4cbf88" : "#343a40"
+                        radius: 6
+                    }
                 }
             }
 
@@ -162,7 +188,34 @@ Window {
                 }
                 ThemedButton {
                     text: "Choose..."
+                    enabled: !trichromeController.exporting
                     onClicked: folderDialog.open()
+                }
+            }
+
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 6
+                visible: trichromeController.exporting ||
+                    trichromeController.exportProgressText.length > 0
+
+                Label {
+                    Layout.fillWidth: true
+                    text: trichromeController.exportProgressText
+                    color: win.cValue
+                    font.pixelSize: 12
+                    elide: Text.ElideMiddle
+                }
+
+                ProgressBar {
+                    Layout.fillWidth: true
+                    from: 0
+                    to: Math.max(1, trichromeController.exportProgressTotal)
+                    value: trichromeController.exportProgressCurrent
+                    indeterminate: trichromeController.exporting &&
+                        trichromeController.exportProgressTotal <= 1
+                    visible: trichromeController.exporting ||
+                        trichromeController.exportProgressTotal > 0
                 }
             }
 
@@ -171,11 +224,11 @@ Window {
                 spacing: 8
                 Item { Layout.fillWidth: true }
                 ThemedButton {
-                    text: "Cancel"
+                    text: trichromeController.exporting ? "Hide" : "Cancel"
                     onClicked: win.visible = false
                 }
                 ThemedButton {
-                    text: "Start Export"
+                    text: trichromeController.exporting ? "Exporting..." : "Start Export"
                     highlighted: true
                     enabled: win.destFolder.toString().length > 0 && !trichromeController.busy
                     onClicked: win.startExport()

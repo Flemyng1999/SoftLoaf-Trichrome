@@ -7,6 +7,7 @@
 #include <QImage>
 
 #include "softloaf_trichrome/model.hpp"
+#include "softloaf_trichrome/raw_classification.hpp"
 
 namespace softloaf::trichrome::desktop {
 
@@ -15,8 +16,11 @@ struct TrichromeCacheInput {
     std::string sensor_mode;
     std::string role_order;
     std::string decode_mode = "preview";
+    std::string raw_decode_policy = softloaf::trichrome::kRawDecodePolicyKey;
+    std::string raw_provenance_identity =
+        softloaf::trichrome::RawDecodePipelineIdentity();
     int max_edge = 2048;
-    int schema_version = 6;
+    int schema_version = 7;
 };
 
 struct CacheLookupResult {

@@ -1,6 +1,119 @@
 # RAW Correctness Report
 
-Date: 2026-06-29
+Date: 2026-07-01
+
+## 2026-07-01 RAW Boundary Update
+
+Goal: default RAW export/probe output remains a guarded linear Rec.2020 path,
+not a blanket claim that every LibRaw-openable RAW is correctly developed.
+
+Current boundary:
+
+- `include/softloaf_trichrome/raw_classification.hpp` classifies LibRaw metadata
+  into Bayer/other CFA, X-Trans, packed RGB, packed four-color, monochrome,
+  Foveon, and unknown `filters == 0`.
+- `DecodeRawToLinearRec2020()` only proceeds for Bayer/other CFA. X-Trans and
+  packed full-color classes are marked fallback-only, so they no longer get
+  silently tagged as correct `rec_2020_linear` output.
+- `DecodeLinear()` camera-native fallback accepts Bayer/other CFA, X-Trans,
+  packed RGB, and packed four-color; it rejects Foveon, monochrome, and unknown
+  `filters == 0`.
+- Foveon, monochrome, and unknown `filters == 0` are protected boundaries, not
+  supported linear Rec.2020 paths.
+- Preview cache identity includes `raw_decode_policy`; artifact signatures also
+  include the current RAW policy via `input_preprocess_sig`, and compose algo
+  version is bumped to 7.
+
+Status buckets:
+
+| class | status | note |
+| --- | --- | --- |
+| Bayer/other CFA | supported for guarded default Rec.2020 path | Still not an RT parity claim without sample comparison. |
+| X-Trans | fallback-only | Do not rely on LibRaw default demosaic as RT parity. |
+| packed RGB | fallback-only | LibRaw full-color fallback only. |
+| packed four-color | fallback-only | LibRaw full-color fallback only. |
+| monochrome | unsupported for default RAW path | Must not be labeled correct Rec.2020 by opening successfully. |
+| Foveon | unsupported for default RAW path | Not a Bayer/X-Trans problem. |
+| unknown `filters == 0` | unsupported for default RAW path | Requires explicit classification before enabling. |
+
+Minimal tests:
+
+```bash
+cmake --build build --target trichrome_smoke trichrome_desktop_core_test
+ctest --test-dir build -R 'trichrome_smoke|trichrome_desktop_core' --output-on-failure
+```
+
+No new RAW sample matrix was added in this update; the classification boundary
+is protected, but no additional camera family coverage is claimed.
+
+## 2026-07-01 RAW Provenance Update
+
+Goal: make RAW decode results carry structured provenance so downstream checks do
+not have to infer RAW behavior from `color_space` strings alone.
+
+Current status:
+
+- `RawDecodeProvenance` records raw class, Rec.2020 policy, decode mode,
+  fallback status, target color space, and the active RAW policy key.
+- `ImageBuf` now carries this provenance for RAW decodes. Camera-native fallback
+  output records the classified RAW class and fallback status; guarded Rec.2020
+  output is still only produced for Bayer/other CFA.
+- `softloaf_raw_probe` prints structured RAW provenance columns, including a
+  stable provenance signature.
+- `softloaf_raw_probe --provenance-only` can inspect classification and policy
+  without writing a TIFF. Normal probe failures also print provenance CSV when
+  LibRaw metadata can be opened/unpacked, so fallback-only and unsupported
+  boundaries are visible instead of collapsing to an opaque decode failure.
+- Preview cache identity now includes `raw_provenance_identity` in addition to
+  the RAW policy field. Artifact `input_preprocess_sig` uses the shared RAW
+  provenance pipeline identity, so pixel-affecting RAW policy/provenance changes
+  dirty cached artifacts.
+- Full artifact rebuilds also append the actual per-source RAW provenance
+  signatures returned by decode, so artifact identity records source-level RAW
+  class/policy/fallback behavior when it is available.
+- Full artifact rebuilds write readable per-source RAW provenance fields onto
+  each `ProjectTrichromeSource` (`raw_class`, `raw_policy`, decode mode,
+  fallback status, target color space, and signature), so the behavior is
+  inspectable and not only present as a hash input.
+- `softloaf_raw_provenance_matrix` emits a CSV matrix for one or more RAW files
+  across guarded Rec.2020 and camera-native fallback targets.
+
+Boundary:
+
+- supported: Bayer/other CFA for guarded linear Rec.2020.
+- fallback-only: X-Trans, packed RGB, packed four-color for camera-native
+  fallback only.
+- unsupported: monochrome, Foveon, and unknown `filters == 0`.
+
+Minimal tests:
+
+```bash
+cmake --build build --target trichrome_smoke trichrome_desktop_core_test softloaf_raw_probe
+ctest --test-dir build -R 'trichrome_smoke|trichrome_desktop_core' --output-on-failure
+```
+
+Optional local sample classification matrix:
+
+```bash
+cmake --build build --target softloaf_raw_provenance_matrix
+build/softloaf_raw_provenance_matrix /path/to/sample.CR3 /path/to/sample.RAF \
+  > /tmp/softloaf_raw_provenance_matrix.csv
+```
+
+No new real RAW samples were added for this provenance update. The
+classification/provenance boundary is protected, but no new camera coverage is
+claimed.
+
+Local provenance matrix run:
+
+- Output: `/tmp/softloaf_raw_provenance_matrix.csv`
+- Samples found locally: CR2, RAF, DNG, 3FR, RW2.
+- Result: all five available samples classified as `bayer_or_other_cfa`; both
+  guarded `rec_2020_linear` and `camera_native_linear` targets were policy-ok
+  for these files.
+- This is a local classification/provenance smoke only. It does not cover
+  X-Trans, packed full-color, monochrome, Foveon, or unknown `filters == 0`, and
+  it is not a new camera-family correctness claim.
 
 ## Current Project Path
 

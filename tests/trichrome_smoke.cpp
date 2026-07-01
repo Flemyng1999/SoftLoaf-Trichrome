@@ -8,6 +8,7 @@
 #include "softloaf_trichrome/composer.hpp"
 #include "softloaf_trichrome/color_management.hpp"
 #include "softloaf_trichrome/import.hpp"
+#include "softloaf_trichrome/raw_classification.hpp"
 #include "softloaf_trichrome/raw_levels.hpp"
 #include "softloaf_trichrome/structure.hpp"
 
@@ -21,6 +22,17 @@ tri::ImageBuf Mono(int rows, int cols, float value) {
     tri::ImageBuf image;
     image.data = cv::Mat(rows, cols, CV_32FC1, cv::Scalar(value));
     image.state = tri::ColorState::kCameraLinear;
+    return image;
+}
+
+tri::ImageBuf MonoWithRawProvenance(int rows,
+                                    int cols,
+                                    float value,
+                                    tri::RawSensorClass raw_class) {
+    tri::ImageBuf image = Mono(rows, cols, value);
+    image.raw_provenance = tri::MakeRawDecodeProvenance(
+        raw_class, tri::RawDecodeMode::kExport,
+        tri::RawDecodeTarget::kCameraNativeLinear);
     return image;
 }
 
@@ -79,11 +91,138 @@ void TestLargeExportSpacesRemainLinear() {
     assert(color::kProPhotoLinear.transfer == color::TransferCurve::kLinear);
 }
 
+void TestRawSensorClassificationBoundaries() {
+    tri::RawClassificationInput bayer;
+    bayer.filters = 0x94949494;
+    bayer.colors = 3;
+    assert(tri::ClassifyRawSensor(bayer) == tri::RawSensorClass::kBayerOrOtherCfa);
+    assert(tri::LinearRec2020PolicyFor(tri::ClassifyRawSensor(bayer)) ==
+           tri::RawLinearRec2020Policy::kSupported);
+
+    tri::RawClassificationInput xtrans;
+    xtrans.filters = 9;
+    xtrans.colors = 3;
+    assert(tri::ClassifyRawSensor(xtrans) == tri::RawSensorClass::kXTrans);
+    assert(tri::LinearRec2020PolicyFor(tri::ClassifyRawSensor(xtrans)) ==
+           tri::RawLinearRec2020Policy::kFallbackOnly);
+
+    tri::RawClassificationInput packed_rgb;
+    packed_rgb.filters = 0;
+    packed_rgb.colors = 3;
+    packed_rgb.has_color3_image = true;
+    assert(tri::ClassifyRawSensor(packed_rgb) == tri::RawSensorClass::kPackedRgb);
+    assert(tri::LinearRec2020PolicyFor(tri::ClassifyRawSensor(packed_rgb)) ==
+           tri::RawLinearRec2020Policy::kFallbackOnly);
+
+    tri::RawClassificationInput packed_four;
+    packed_four.filters = 0;
+    packed_four.colors = 4;
+    packed_four.has_float4_image = true;
+    assert(tri::ClassifyRawSensor(packed_four) == tri::RawSensorClass::kPackedFourColor);
+    assert(tri::LinearRec2020PolicyFor(tri::ClassifyRawSensor(packed_four)) ==
+           tri::RawLinearRec2020Policy::kFallbackOnly);
+
+    tri::RawClassificationInput mono;
+    mono.filters = 0;
+    mono.colors = 1;
+    assert(tri::ClassifyRawSensor(mono) == tri::RawSensorClass::kMonochrome);
+    assert(tri::LinearRec2020PolicyFor(tri::ClassifyRawSensor(mono)) ==
+           tri::RawLinearRec2020Policy::kUnsupported);
+
+    tri::RawClassificationInput foveon;
+    foveon.filters = 0;
+    foveon.colors = 3;
+    foveon.is_foveon = true;
+    foveon.has_color3_image = true;
+    assert(tri::ClassifyRawSensor(foveon) == tri::RawSensorClass::kFoveon);
+    assert(tri::LinearRec2020PolicyFor(tri::ClassifyRawSensor(foveon)) ==
+           tri::RawLinearRec2020Policy::kUnsupported);
+
+    tri::RawClassificationInput unknown;
+    unknown.filters = 0;
+    unknown.colors = 2;
+    assert(tri::ClassifyRawSensor(unknown) == tri::RawSensorClass::kUnknownFiltersZero);
+    assert(tri::LinearRec2020PolicyFor(tri::ClassifyRawSensor(unknown)) ==
+           tri::RawLinearRec2020Policy::kUnsupported);
+}
+
+void TestRawDecodeProvenanceMapping() {
+    const tri::RawDecodeProvenance bayer = tri::MakeRawDecodeProvenance(
+        tri::RawSensorClass::kBayerOrOtherCfa, tri::RawDecodeMode::kExport,
+        "rec_2020_linear");
+    assert(bayer.present);
+    assert(bayer.policy == tri::RawLinearRec2020Policy::kSupported);
+    assert(bayer.fallback_status == tri::RawDecodeFallbackStatus::kNone);
+    assert(bayer.target_color_space == "rec_2020_linear");
+    assert(tri::RawDecodePolicyAllowsTarget(
+        bayer.policy, tri::RawDecodeTarget::kLinearRec2020));
+    assert(tri::RawDecodeProvenanceSignature(bayer).find("class=bayer_or_other_cfa") !=
+           std::string::npos);
+
+    const tri::RawDecodeProvenance xtrans = tri::MakeRawDecodeProvenance(
+        tri::RawSensorClass::kXTrans, tri::RawDecodeMode::kPreview,
+        "camera_native_linear");
+    assert(xtrans.policy == tri::RawLinearRec2020Policy::kFallbackOnly);
+    assert(xtrans.fallback_status == tri::RawDecodeFallbackStatus::kFallbackOnly);
+    assert(tri::RawDecodePolicyAllowsTarget(
+        xtrans.policy, tri::RawDecodeTarget::kCameraNativeLinear));
+    assert(!tri::RawDecodePolicyAllowsTarget(
+        xtrans.policy, tri::RawDecodeTarget::kLinearRec2020));
+    assert(std::string(tri::RawDecodePolicyTargetReason(
+        xtrans.policy, tri::RawDecodeTarget::kLinearRec2020)) ==
+        "raw_fallback_only_not_rec2020");
+    assert(tri::RawDecodeProvenanceSignature(xtrans) !=
+           tri::RawDecodeProvenanceSignature(bayer));
+
+    const tri::RawDecodeProvenance foveon = tri::MakeRawDecodeProvenance(
+        tri::RawSensorClass::kFoveon, tri::RawDecodeMode::kExport,
+        "rec_2020_linear");
+    assert(foveon.policy == tri::RawLinearRec2020Policy::kUnsupported);
+    assert(foveon.fallback_status == tri::RawDecodeFallbackStatus::kUnsupported);
+    assert(!tri::RawDecodePolicyAllowsTarget(
+        foveon.policy, tri::RawDecodeTarget::kCameraNativeLinear));
+    assert(std::string(tri::RawDecodePolicyTargetReason(
+        foveon.policy, tri::RawDecodeTarget::kCameraNativeLinear)) ==
+        "raw_unsupported");
+}
+
+void TestArtifactIdentityIncludesRawProvenancePolicy() {
+    tri::ProjectTrichromeGroup group;
+    group.mode = "trichrome";
+    group.sensor_type = "bayer";
+    group.strict_order = "RGB";
+    group.validation_status = "valid";
+    group.group_size = 3;
+    group.artifact_format = tri::kDefaultArtifactFormat;
+    group.artifact_pixel_type = "uint16";
+    group.artifact_width = 32;
+    group.artifact_height = 24;
+    group.artifact_channel_order = "RGB";
+    group.artifact_color_state = tri::kArtifactColorState;
+    group.compose_algo_version = tri::kComposeAlgoVersion;
+    group.input_preprocess_sig = tri::RawDecodePipelineIdentity();
+    group.sources = {{"red", "R.raw"}, {"green", "G.raw"}, {"blue", "B.raw"}};
+    for (tri::ProjectTrichromeSource& source : group.sources) {
+        source.probe_ok = true;
+        source.probe_size = 4;
+        source.probe_mtime = 123;
+        source.probe_partial_hash = 456;
+    }
+    const std::array<double, 3> white = {1.0, 1.0, 1.0};
+    const std::string sig = tri::ComputeArtifactSignature(
+        group, tri::ArtifactTier::kFull, white);
+    group.input_preprocess_sig = "raw-provenance-test:changed";
+    assert(tri::ComputeArtifactSignature(group, tri::ArtifactTier::kFull, white) != sig);
+}
+
 }  // namespace
 
 int main() {
     TestColourScienceReferenceMatrices();
     TestLargeExportSpacesRemainLinear();
+    TestRawSensorClassificationBoundaries();
+    TestRawDecodeProvenanceMapping();
+    TestArtifactIdentityIncludesRawProvenancePolicy();
 
     const fs::path root = fs::temp_directory_path() / "softloaf_trichrome_smoke";
     std::error_code ec;
@@ -125,6 +264,46 @@ int main() {
     assert(built.ok);
     assert(fs::exists(built.artifact_path));
     assert(!meta.trichrome_groups[0].artifact_sig.empty());
+    assert(meta.trichrome_groups[0].input_preprocess_sig == tri::RawDecodePipelineIdentity());
+
+    tri::ProjectMeta meta_with_provenance = plan.recipe.ToProjectMeta();
+    meta_with_provenance.trichrome_roll_white = {1.0, 1.0, 1.0};
+    meta_with_provenance.trichrome_roll_white_valid = true;
+    const std::unordered_map<std::string, tri::ImageBuf> raw_images = {
+        {(root / "001_R.raf").string(),
+         MonoWithRawProvenance(2, 2, 0.25f, tri::RawSensorClass::kBayerOrOtherCfa)},
+        {(root / "002_G.raf").string(),
+         MonoWithRawProvenance(2, 2, 0.50f, tri::RawSensorClass::kXTrans)},
+        {(root / "003_B.raf").string(),
+         MonoWithRawProvenance(2, 2, 0.75f, tri::RawSensorClass::kPackedRgb)},
+    };
+    const auto raw_decoder = [&raw_images](const fs::path& path) {
+        const auto it = raw_images.find(path.string());
+        return it == raw_images.end() ? tri::ImageBuf{} : it->second;
+    };
+    const tri::ComposeResult raw_composed =
+        tri::ComposeGroup(meta_with_provenance.trichrome_groups[0], raw_decoder);
+    assert(raw_composed.ok);
+    assert(raw_composed.source_provenance_sigs.size() == 3);
+    assert(raw_composed.source_provenance_records.size() == 3);
+    const tri::ArtifactBuildResult raw_built = tri::BuildTrichromeFullArtifact(
+        &meta_with_provenance, 0, root / "bundle_provenance", raw_decoder);
+    assert(raw_built.ok);
+    assert(meta_with_provenance.trichrome_groups[0].input_preprocess_sig.find(
+               "raw-source-provenance-v1") != std::string::npos);
+    assert(meta_with_provenance.trichrome_groups[0].input_preprocess_sig.find(
+               "class=xtrans") != std::string::npos);
+    const auto& provenance_sources = meta_with_provenance.trichrome_groups[0].sources;
+    assert(provenance_sources.size() == 3);
+    assert(provenance_sources[0].raw_class == "bayer_or_other_cfa");
+    assert(provenance_sources[0].raw_policy == "supported");
+    assert(provenance_sources[1].raw_class == "xtrans");
+    assert(provenance_sources[1].raw_fallback_status == "fallback_only");
+    assert(provenance_sources[2].raw_class == "packed_rgb");
+    assert(provenance_sources[2].raw_target_color_space == "camera_native_linear");
+    assert(!provenance_sources[2].raw_provenance_sig.empty());
+    assert(meta_with_provenance.trichrome_groups[0].artifact_sig !=
+           meta.trichrome_groups[0].artifact_sig);
 
     const tri::ImageBuf pattern = Pattern();
     tri::ProjectTrichromeGroup group;

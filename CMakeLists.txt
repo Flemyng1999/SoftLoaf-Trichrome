@@ -6,7 +6,7 @@ if(APPLE)
 endif()
 
 project(SoftLoafTrichrome
-    VERSION 0.1.0
+    VERSION 0.2.0
     DESCRIPTION "Standalone SoftLoaf trichrome desktop app and core"
     LANGUAGES CXX)
 
@@ -154,6 +154,16 @@ if(SOFTLOAF_TRICHROME_BUILD_TOOLS)
         target_include_directories(softloaf_raw_probe PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/src)
         target_link_libraries(softloaf_raw_probe PRIVATE
+            softloaf_trichrome
+            ${SOFTLOAF_LIBRAW_TARGET}
+            Qt6::Core)
+
+        add_executable(softloaf_raw_provenance_matrix
+            tools/softloaf_raw_provenance_matrix.cpp
+            src/desktop_decoder.cpp)
+        target_include_directories(softloaf_raw_provenance_matrix PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/src)
+        target_link_libraries(softloaf_raw_provenance_matrix PRIVATE
             softloaf_trichrome
             ${SOFTLOAF_LIBRAW_TARGET}
             Qt6::Core)

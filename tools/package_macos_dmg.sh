@@ -2,7 +2,7 @@
 set -euo pipefail
 
 build_dir="${1:-build}"
-version="${SOFTLOAF_TRICHROME_VERSION:-0.1.0-alpha.1}"
+version="${SOFTLOAF_TRICHROME_VERSION:-0.2.0-beta.1}"
 app_target="softloaf_trichrome_app"
 app="${build_dir}/${app_target}.app"
 dist_app_name="SoftLoaf Trichrome.app"

@@ -12,10 +12,12 @@
 #include <QImage>
 #include <QImageReader>
 #include <QImageWriter>
+#include <QSet>
 #include <QStandardPaths>
 #include <QUrl>
 
 #include "obs_log.hpp"
+#include "export_naming.hpp"
 #include "qt_path_utils.hpp"
 #include "softloaf_trichrome/color_management.hpp"
 #include "trichrome_cache.hpp"
@@ -82,6 +84,14 @@ void TestPreviewCacheIdentityAndHit() {
     desktop::TrichromeCacheInput export_input = input;
     export_input.decode_mode = "export";
     assert(cache.keyFor(export_input) != key);
+
+    desktop::TrichromeCacheInput fallback_input = input;
+    fallback_input.raw_decode_policy = "raw-boundary-test:fallback-changed";
+    assert(cache.keyFor(fallback_input) != key);
+
+    desktop::TrichromeCacheInput provenance_input = input;
+    provenance_input.raw_provenance_identity = "raw-provenance-test:changed";
+    assert(cache.keyFor(provenance_input) != key);
 
     const desktop::CacheLookupResult miss = cache.lookup(input);
     assert(!miss.hit);
@@ -161,6 +171,49 @@ void TestGeneratedIccProfilesRoundTripThroughTiff() {
     fs::remove_all(root, ec);
 }
 
+void TestExportNamingUsesSourceStemAndAvoidsOverwrite() {
+    const fs::path root = fs::temp_directory_path() / "softloaf_trichrome_export_name_test";
+    std::error_code ec;
+    fs::remove_all(root, ec);
+    fs::create_directories(root, ec);
+
+    softloaf::trichrome::ProjectTrichromeGroup group;
+    group.group_index = 0;
+    group.logical_frame_index = 0;
+    softloaf::trichrome::ProjectTrichromeSource source;
+    const QString source_path = desktop::QStringFromPath(root / "11.raf");
+    source.path = source_path.toUtf8().toStdString();
+    group.sources.push_back(std::move(source));
+
+    const QString folder = desktop::QStringFromPath(root);
+    assert(desktop::ExportBaseNameForGroup(group) == QStringLiteral("11_rgb"));
+    assert(desktop::ExportBaseNameForGroup(group, QStringLiteral("_final")) ==
+           QStringLiteral("11_final"));
+    assert(desktop::ExportBaseNameForGroup(group, QStringLiteral("")) ==
+           QStringLiteral("11_rgb"));
+    assert(desktop::ExportBaseNameForGroup(group, QStringLiteral("_bad/name")) ==
+           QStringLiteral("11_bad_name"));
+    assert(desktop::UniqueExportPathForGroup(folder, group, QStringLiteral("tiff")) ==
+           QDir(folder).filePath(QStringLiteral("11_rgb.tiff")));
+
+    WriteFile(root / "11_rgb.tiff", "existing export");
+    QSet<QString> reserved_paths;
+    assert(desktop::UniqueExportPathForGroup(folder, group, QStringLiteral("tiff"),
+                                            &reserved_paths) ==
+           QDir(folder).filePath(QStringLiteral("11_rgb_2.tiff")));
+    assert(desktop::UniqueExportPathForGroup(folder, group, QStringLiteral("tiff"),
+                                            &reserved_paths) ==
+           QDir(folder).filePath(QStringLiteral("11_rgb_3.tiff")));
+
+    softloaf::trichrome::ProjectTrichromeGroup fallback_group;
+    fallback_group.group_index = 4;
+    fallback_group.logical_frame_index = -1;
+    assert(desktop::ExportBaseNameForGroup(fallback_group) ==
+           QStringLiteral("trichrome_frame_0005_rgb"));
+
+    fs::remove_all(root, ec);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -172,5 +225,6 @@ int main(int argc, char** argv) {
     TestPreviewCacheIdentityAndHit();
     TestUnicodePathUtilities();
     TestGeneratedIccProfilesRoundTripThroughTiff();
+    TestExportNamingUsesSourceStemAndAvoidsOverwrite();
     return 0;
 }

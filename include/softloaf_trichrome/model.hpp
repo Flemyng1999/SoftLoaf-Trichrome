@@ -106,6 +106,12 @@ struct ProjectTrichromeSource {
     uint64_t probe_size = 0;
     int64_t probe_mtime = 0;
     uint64_t probe_partial_hash = 0;
+    std::string raw_class;
+    std::string raw_policy;
+    std::string raw_decode_mode;
+    std::string raw_fallback_status;
+    std::string raw_target_color_space;
+    std::string raw_provenance_sig;
 };
 
 struct ProjectTrichromeRoleShift {

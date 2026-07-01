@@ -287,7 +287,9 @@ ApplicationWindow {
                         }
 
                         Text {
-                            text: trichromeController.hasPreview
+                            text: trichromeController.exporting
+                                ? trichromeController.exportProgressText
+                                : trichromeController.hasPreview
                                 ? "Composite preview"
                                 : "Load a complete R/G/B group"
                             color: "#f4f0e8"

@@ -19,21 +19,22 @@ with sequential red, green, and blue captures. It imports triplets from RAW or
 standard image files, previews the composed color frame, and exports finished
 images for editing or archival workflows.
 
-This project is currently alpha software. The image pipeline, RAW compatibility,
-and release packaging are actively being hardened.
+This project is currently beta software. The trichrome workflow, export path,
+and release packaging are ready for broader testing, while RAW camera
+correctness remains guarded by explicit provenance boundaries.
 
 ## Downloads
 
-Prebuilt alpha packages are published on the
+Prebuilt beta packages are published on the
 [GitHub Releases](https://github.com/Flemyng1999/SoftLoaf-Trichrome/releases)
 page.
 
 | Platform | Package | Status |
 | --- | --- | --- |
 | macOS 15.0 or newer | DMG | Signed and notarized release workflow |
-| Windows 10/11 x64 | Installer and portable zip | Unsigned alpha tester build |
+| Windows 10/11 x64 | Installer and portable zip | Unsigned beta tester build |
 
-Windows SmartScreen may warn because the alpha Windows builds are not yet
+Windows SmartScreen may warn because the beta Windows builds may not yet be
 Authenticode signed. Verify downloads with the `.sha256` files attached to each
 release.
 
@@ -61,9 +62,10 @@ release.
 5. Preview the composed result.
 6. Export a single frame or all complete frames.
 
-Supported RAW formats include common camera files such as `.3fr`, `.dng`,
+Supported RAW containers include common camera files such as `.3fr`, `.dng`,
 `.arw`, `.cr2`, `.cr3`, `.nef`, `.raf`, `.rw2`, `.orf`, `.pef`, and `.srw`,
-plus TIFF/JPEG/PNG.
+plus TIFF/JPEG/PNG. RAW output uses explicit class/provenance boundaries; file
+open support is not a blanket color-correctness guarantee for every camera.
 
 ## Build From Source
 

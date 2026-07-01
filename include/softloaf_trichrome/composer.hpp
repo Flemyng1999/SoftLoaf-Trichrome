@@ -23,6 +23,7 @@
 #include "softloaf_trichrome/artifact.hpp"
 #include "softloaf_trichrome/image_buf.hpp"
 #include "softloaf_trichrome/model.hpp"
+#include "softloaf_trichrome/raw_classification.hpp"
 
 namespace softloaf::trichrome {
 
@@ -34,6 +35,8 @@ struct ComposeResult {
     bool ok = false;
     std::string reason = "compose_not_started";
     std::vector<std::string> warnings;
+    std::vector<std::string> source_provenance_sigs;
+    std::vector<ProjectTrichromeSource> source_provenance_records;
     ImageBuf rgb;
     ImageBuf nir;
     bool has_nir = false;
@@ -110,6 +113,7 @@ inline ImageBuf ExtractRgbChannel(const ImageBuf& image, int channel) {
     out.color_space = image.color_space;
     out.camera_to_xyz_d50 = image.camera_to_xyz_d50;
     out.has_camera_to_xyz_d50 = image.has_camera_to_xyz_d50;
+    out.raw_provenance = image.raw_provenance;
     return out;
 }
 
@@ -127,6 +131,7 @@ inline ImageBuf AverageRgbChannels(const ImageBuf& image) {
     out.color_space = image.color_space;
     out.camera_to_xyz_d50 = image.camera_to_xyz_d50;
     out.has_camera_to_xyz_d50 = image.has_camera_to_xyz_d50;
+    out.raw_provenance = image.raw_provenance;
     return out;
 }
 
@@ -267,6 +272,59 @@ inline bool NormalizeRgbByChannelWhite(ImageBuf* rgb, const cv::Vec3d& white) {
     return true;
 }
 
+inline void AppendInputPreprocessSig(ProjectTrichromeGroup* group,
+                                     const std::string& sig) {
+    if (!group || sig.empty()) return;
+    if (group->input_preprocess_sig.empty()) {
+        group->input_preprocess_sig = sig;
+    } else if (group->input_preprocess_sig.find(sig) == std::string::npos) {
+        group->input_preprocess_sig += "|";
+        group->input_preprocess_sig += sig;
+    }
+}
+
+inline std::string SourceRawProvenanceIdentity(
+    const std::vector<std::string>& source_provenance_sigs) {
+    if (source_provenance_sigs.empty()) return {};
+    std::string identity = "raw-source-provenance-v1";
+    for (const std::string& sig : source_provenance_sigs) {
+        identity += "|";
+        identity += sig;
+    }
+    return identity;
+}
+
+inline void SetSourceRawProvenance(ProjectTrichromeSource* source,
+                                   const RawDecodeProvenance& provenance) {
+    if (!source || !provenance.present) return;
+    source->raw_class = RawSensorClassName(provenance.raw_class);
+    source->raw_policy = RawLinearRec2020PolicyName(provenance.policy);
+    source->raw_decode_mode = RawDecodeModeName(provenance.decode_mode);
+    source->raw_fallback_status =
+        RawDecodeFallbackStatusName(provenance.fallback_status);
+    source->raw_target_color_space = provenance.target_color_space;
+    source->raw_provenance_sig = RawDecodeProvenanceSignature(provenance);
+}
+
+inline void ApplySourceRawProvenance(
+    ProjectTrichromeGroup* group,
+    const std::vector<ProjectTrichromeSource>& provenance_records) {
+    if (!group || provenance_records.empty()) return;
+    for (ProjectTrichromeSource& source : group->sources) {
+        for (const ProjectTrichromeSource& record : provenance_records) {
+            if (source.role == record.role && source.path == record.path) {
+                source.raw_class = record.raw_class;
+                source.raw_policy = record.raw_policy;
+                source.raw_decode_mode = record.raw_decode_mode;
+                source.raw_fallback_status = record.raw_fallback_status;
+                source.raw_target_color_space = record.raw_target_color_space;
+                source.raw_provenance_sig = record.raw_provenance_sig;
+                break;
+            }
+        }
+    }
+}
+
 inline ComposeResult ComposeGroup(const ProjectTrichromeGroup& group,
                                   const ImageDecoder& decoder) {
     ComposeResult result;
@@ -274,11 +332,11 @@ inline ComposeResult ComposeGroup(const ProjectTrichromeGroup& group,
         result.reason = "compose_decoder_missing";
         return result;
     }
-    struct DecodedSource { std::string role; ImageBuf image; };
+    struct DecodedSource { std::string role; std::string path; ImageBuf image; };
     std::vector<std::future<DecodedSource>> futures;
     for (const ProjectTrichromeSource& source : group.sources) {
         futures.push_back(std::async(std::launch::async, [source, &decoder]() {
-            return DecodedSource{source.role, decoder(source.path)};
+            return DecodedSource{source.role, source.path, decoder(source.path)};
         }));
     }
     std::vector<DecodedSource> decoded;
@@ -287,6 +345,19 @@ inline ComposeResult ComposeGroup(const ProjectTrichromeGroup& group,
     } catch (...) {
         result.reason = "compose_decode_exception";
         return result;
+    }
+    std::vector<std::string> source_provenance_sigs;
+    std::vector<ProjectTrichromeSource> source_provenance_records;
+    for (const DecodedSource& source : decoded) {
+        if (!source.image.raw_provenance.present) continue;
+        source_provenance_sigs.push_back(
+            source.role + "=" +
+            RawDecodeProvenanceSignature(source.image.raw_provenance));
+        ProjectTrichromeSource record;
+        record.role = source.role;
+        record.path = source.path;
+        SetSourceRawProvenance(&record, source.image.raw_provenance);
+        source_provenance_records.push_back(std::move(record));
     }
     const bool bayer = group.sensor_type == "bayer";
     if (bayer) {
@@ -319,6 +390,8 @@ inline ComposeResult ComposeGroup(const ProjectTrichromeGroup& group,
     }
     result = ComposeMonoRgb(red, green, blue);
     if (!result.ok) return result;
+    result.source_provenance_sigs = std::move(source_provenance_sigs);
+    result.source_provenance_records = std::move(source_provenance_records);
     if (!nir.empty()) {
         if (!IsSceneLinearMono(nir) ||
             nir.width() != result.rgb.width() || nir.height() != result.rgb.height()) {
@@ -440,6 +513,7 @@ inline ProjectTrichromeGroup PrepareWorkingGroup(const ProjectTrichromeGroup& gr
     working.artifact_channel_order = "RGB";
     working.artifact_color_state = kArtifactColorState;
     working.compose_algo_version = kComposeAlgoVersion;
+    AppendInputPreprocessSig(&working, RawDecodePipelineIdentity());
     return working;
 }
 
@@ -531,6 +605,10 @@ inline ArtifactBuildResult BuildTrichromeFullArtifact(ProjectMeta* meta,
         result.reason = composed.reason;
         return result;
     }
+    AppendInputPreprocessSig(&working,
+                             SourceRawProvenanceIdentity(
+                                 composed.source_provenance_sigs));
+    ApplySourceRawProvenance(&working, composed.source_provenance_records);
     ImageBuf artifact_rgb = composed.rgb;
     NormalizeRgbByChannelWhite(&artifact_rgb,
                                cv::Vec3d(meta->trichrome_roll_white[0],
