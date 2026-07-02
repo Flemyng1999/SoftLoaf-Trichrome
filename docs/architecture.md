@@ -14,7 +14,7 @@ This app follows a smaller version of the SoftLoaf Negative lifecycle model.
   stale worker results are dropped by generation guard before UI mutation.
 - RAW preview/development reads use LibRaw half-size processing. The preview
   cache stores the composed trichrome result, resampled so its long edge is at
-  most 4096 px. A cache hit publishes that image without re-reading RAW files.
+  most 2048 px. A cache hit publishes that image without re-reading RAW files.
   Full demosaicked RAW resolution is reserved for explicit export tasks.
 - Export is an explicit background task. Active-frame export and export-all
   both re-compose from the source files instead of saving the published preview.
@@ -33,7 +33,7 @@ This app follows a smaller version of the SoftLoaf Negative lifecycle model.
   and the trichrome composite enters the named working state
   `linear_srgb_trichrome` before display or export encoding.
 - Export encodes from that linear composite into named targets. The professional
-  defaults are TIFF/DNG-family 16-bit and large linear spaces: ACES AP0, ACEScg,
+  defaults are TIFF 16-bit and large linear spaces: ACES AP0, ACEScg,
   ProPhoto RGB, or Rec.2020. Legacy/display targets such as sRGB, Display P3,
   Rec.709, and Adobe RGB remain available for handoff needs.
 - Export color constants are centralized in `color_management.hpp` and follow
@@ -78,7 +78,7 @@ category=<name> key=value key=value
   interruption inside every long-running step, so shutdown can wait for the
   current decode to return.
 - Export has an async full-source task, explicit target color-space encoding,
-  TIFF/DNG-family 8-bit or 16-bit selection, and generated ICC profiles. The
+  TIFF 8-bit or 16-bit selection, and generated ICC profiles. The
   upstream camera-matrix / calibrated working-space policy is not yet equivalent
   to SoftLoaf Negative export.
 - RAW-to-working-space compatibility needs a RawTherapee-informed test plan:

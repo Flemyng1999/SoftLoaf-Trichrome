@@ -104,6 +104,7 @@ class TrichromeController : public QObject {
     void addFiles(std::vector<std::filesystem::path> paths);
     void addWorker(QThread* worker, const QString& task_name);
     void cancelAndDrainWorkers(int timeout_ms);
+    void requestBackgroundFrameProcessingStop();
     void exportActiveTo(const QString& folder, const ExportSettings& settings);
     void exportAllTo(const QString& folder, const ExportSettings& settings);
     void startBackgroundFrameProcessing();

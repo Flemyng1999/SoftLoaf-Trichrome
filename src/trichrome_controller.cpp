@@ -131,6 +131,12 @@ QString NormalizeExportFormat(QString format) {
     return "tiff";
 }
 
+QString UnsupportedExportFormatReason(const QString& format) {
+    if (format == "dng")
+        return QStringLiteral("DNG export is not supported yet. Choose TIFF.");
+    return {};
+}
+
 QString NormalizeExportColorSpace(QString color_space) {
     color_space = color_space.trimmed().toLower();
     color_space.replace("-", "_");
@@ -594,6 +600,7 @@ void TrichromeController::startExport(const QUrl& folder_url,
                                       const QString& color_space,
                                       int bit_depth,
                                       const QString& name_suffix) {
+    if (exporting_) return;
     QString folder = LocalPathFromUrl(folder_url);
     if (folder.isEmpty()) {
         setStatus("Choose an export folder");
@@ -604,6 +611,13 @@ void TrichromeController::startExport(const QUrl& folder_url,
     settings.color_space = NormalizeExportColorSpace(color_space);
     settings.bit_depth = NormalizeExportBitDepth(settings.format, bit_depth);
     settings.name_suffix = NormalizeExportNameSuffix(name_suffix);
+    const QString unsupported_reason = UnsupportedExportFormatReason(settings.format);
+    if (!unsupported_reason.isEmpty()) {
+        setExportProgress(false, 0, 0, unsupported_reason);
+        setStatus(unsupported_reason);
+        return;
+    }
+    requestBackgroundFrameProcessingStop();
     if (export_all)
         exportAllTo(folder, settings);
     else
@@ -955,6 +969,16 @@ void TrichromeController::cancelAndDrainWorkers(int timeout_ms) {
     workers_.clear();
     setBusy(false);
     ObsLog("worker.drain", {{"event", "finish"}});
+}
+
+void TrichromeController::requestBackgroundFrameProcessingStop() {
+    ++process_generation_;
+    for (const QPointer<QThread>& worker : workers_) {
+        if (worker && worker->objectName() == "ProcessImportedFramesWorker")
+            worker->requestInterruption();
+    }
+    ObsLog("worker.interrupt", {{"task", "ProcessImportedFrames"},
+                                {"reason", "export_requested"}});
 }
 
 void TrichromeController::shutdown() {

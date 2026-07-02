@@ -307,7 +307,7 @@ ApplicationWindow {
 
                     ThemedButton {
                         text: "Export"
-                        enabled: trichromeController.activeGroup >= 0 && !trichromeController.busy
+                        enabled: trichromeController.activeGroup >= 0 && !trichromeController.exporting
                         onClicked: exportWindow.openForExport()
                     }
                 }

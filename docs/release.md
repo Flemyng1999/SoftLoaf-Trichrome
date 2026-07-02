@@ -6,10 +6,10 @@ available under GPLv3.
 Current release target:
 
 ```text
-v0.2.0-beta.1
+v0.2.0-beta.2
 ```
 
-The CMake project version remains `0.2.0`; the `beta.1` suffix belongs to the
+The CMake project version remains `0.2.0`; the `beta.2` suffix belongs to the
 Git tag, GitHub Release title, DMG filename, and release notes.
 
 The app icon currently reuses the SoftLoaf identity assets from SoftLoaf
@@ -71,7 +71,7 @@ Local unsigned smoke package, for development only:
 
 ```bash
 SOFTLOAF_CODESIGN_IDENTITY="-" \
-SOFTLOAF_TRICHROME_VERSION="0.2.0-beta.1" \
+SOFTLOAF_TRICHROME_VERSION="0.2.0-beta.2" \
   tools/package_macos_dmg.sh build-release
 ```
 
@@ -79,7 +79,7 @@ Signed package:
 
 ```bash
 SOFTLOAF_CODESIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
-SOFTLOAF_TRICHROME_VERSION="0.2.0-beta.1" \
+SOFTLOAF_TRICHROME_VERSION="0.2.0-beta.2" \
   tools/package_macos_dmg.sh build-release
 ```
 
@@ -101,7 +101,7 @@ xcrun notarytool store-credentials softloaf-notary \
   --password "app-specific-password"
 
 SOFTLOAF_NOTARY_KEYCHAIN_PROFILE=softloaf-notary \
-  tools/notarize_macos_dmg.sh build-release/SoftLoaf-Trichrome-0.2.0-beta.1-macOS.dmg
+  tools/notarize_macos_dmg.sh build-release/SoftLoaf-Trichrome-0.2.0-beta.2-macOS.dmg
 ```
 
 Apple's notarization guide:
@@ -193,7 +193,7 @@ When Sparkle, WinSparkle, or another updater exists, add:
 latest.json
 ```
 
-The current workflow names are still accepted for `v0.2.0-beta.1`, but new
+The current workflow names are still accepted for `v0.2.0-beta.2`, but new
 release automation should migrate to the dotted product prefix and underscore
 version separator above so the asset list reads like the benchmark release.
 
@@ -207,21 +207,21 @@ Every release note should follow this order:
 6. `Packaging Notes` only when the release has unusual constraints.
 
 ```bash
-git add docs/release_notes/v0.2.0-beta.1.md
-git commit -m "Add v0.2.0-beta.1 release notes"
-git tag -a v0.2.0-beta.1 -m "SoftLoaf Trichrome v0.2.0-beta.1"
+git add docs/release_notes/v0.2.0-beta.2.md
+git commit -m "Add v0.2.0-beta.2 release notes"
+git tag -a v0.2.0-beta.2 -m "SoftLoaf Trichrome v0.2.0-beta.2"
 git push origin main
-git push origin v0.2.0-beta.1
+git push origin v0.2.0-beta.2
 ```
 
 Create the release as a draft first:
 
 ```bash
-gh release create v0.2.0-beta.1 \
-  build-release/SoftLoaf-Trichrome-0.2.0-beta.1-macOS.dmg \
-  build-release/SoftLoaf-Trichrome-0.2.0-beta.1-macOS.dmg.sha256 \
-  --title "SoftLoaf Trichrome v0.2.0-beta.1" \
-  --notes-file docs/release_notes/v0.2.0-beta.1.md \
+gh release create v0.2.0-beta.2 \
+  build-release/SoftLoaf-Trichrome-0.2.0-beta.2-macOS.dmg \
+  build-release/SoftLoaf-Trichrome-0.2.0-beta.2-macOS.dmg.sha256 \
+  --title "SoftLoaf Trichrome v0.2.0-beta.2" \
+  --notes-file docs/release_notes/v0.2.0-beta.2.md \
   --draft \
   --prerelease
 ```
@@ -230,7 +230,7 @@ Inspect the draft in GitHub before publishing it.
 
 Release publication checklist:
 
-1. create or verify the annotated tag, for example `v0.2.0-beta.1`;
+1. create or verify the annotated tag, for example `v0.2.0-beta.2`;
 2. create the GitHub Release as `--draft --prerelease`;
 3. run the macOS release workflow with draft creation enabled, or upload to the
    existing draft;
@@ -240,7 +240,7 @@ Release publication checklist:
 6. verify the asset list, checksums, draft flag, and prerelease flag with:
 
 ```bash
-gh release view v0.2.0-beta.1 \
+gh release view v0.2.0-beta.2 \
   --json tagName,name,url,isDraft,isPrerelease,assets
 ```
 
@@ -269,7 +269,7 @@ Supported Windows versions are Windows 10 and Windows 11. CMake defines
 
 Recommended path:
 
-1. For `v0.2.0-beta.1`, publish Windows only as explicit unsigned tester
+1. For `v0.2.0-beta.2`, publish Windows only as explicit unsigned tester
    artifacts.
 2. Before wider Windows release, buy an OV code-signing certificate or set up a
    cloud signing provider.
@@ -298,7 +298,7 @@ Run Windows packaging from GitHub Actions, not a local developer shell:
 
 ```bash
 gh workflow run "Release Windows" \
-  -f version=0.2.0-beta.1 \
+  -f version=0.2.0-beta.2 \
   -f upload_to_release=true
 ```
 
@@ -314,7 +314,7 @@ After the run completes, verify both the workflow and the release draft:
 
 ```bash
 gh run list --workflow "Release Windows" --limit 5
-gh release view v0.2.0-beta.1 --json isDraft,isPrerelease,assets
+gh release view v0.2.0-beta.2 --json isDraft,isPrerelease,assets
 ```
 
 For the earlier `v0.1.0-alpha.1`, the successful Windows run was `28321855649`.

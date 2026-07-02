@@ -96,8 +96,7 @@ Window {
                     textRole: "text"
                     valueRole: "value"
                     model: [
-                        { text: "TIFF", value: "tiff" },
-                        { text: "DNG", value: "dng" }
+                        { text: "TIFF", value: "tiff" }
                     ]
                 }
             }
@@ -230,7 +229,7 @@ Window {
                 ThemedButton {
                     text: trichromeController.exporting ? "Exporting..." : "Start Export"
                     highlighted: true
-                    enabled: win.destFolder.toString().length > 0 && !trichromeController.busy
+                    enabled: win.destFolder.toString().length > 0 && !trichromeController.exporting
                     onClicked: win.startExport()
                 }
             }

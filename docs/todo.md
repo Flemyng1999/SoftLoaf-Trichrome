@@ -50,7 +50,7 @@ Last updated: 2026-06-28
 - [ ] Add explicit task progress and cancellation.
   - Exit criteria: preview/export jobs report current frame, total frames, and
     user cancellation; cancellation prevents stale UI publication.
-- [ ] Add full-resolution export policy.
+- [x] Add full-resolution export policy.
   - Exit criteria: export settings are explicit for format, bit depth, naming,
     overwrite behavior, and output folder; active/all export share the same
     snapshot model.
@@ -81,7 +81,7 @@ Last updated: 2026-06-28
 ### P1 - Color And Output Quality
 
 - [x] Add large-space export targets and high-bit-depth selection.
-  - Exit criteria: TIFF/DNG-family outputs expose 8-bit and 16-bit choices; export defaults to
+  - Exit criteria: TIFF outputs expose 8-bit and 16-bit choices; export defaults to
     16-bit and offers large linear spaces rather than display-only targets.
 - [x] Define the color pipeline.
   - Exit criteria: document source linear state, working space, display view,
@@ -96,10 +96,10 @@ Last updated: 2026-06-28
     public raw.pixls.us fixtures, excluding phones and uncommon cameras from
     the first matrix.
 - [x] Add ICC-aware SDR export.
-  - Exit criteria: TIFF/DNG-family outputs embed the correct ICC and tests verify
+  - Exit criteria: TIFF outputs embed the correct ICC and tests verify
     metadata for each supported output space.
 - [x] Verify high-bit-depth export metadata.
-  - Exit criteria: 16-bit TIFF/DNG-family output does not round-trip
+  - Exit criteria: 16-bit TIFF output does not round-trip
     through 8-bit `QImage`, and automated tests inspect the written files.
 - [ ] Add regression samples.
   - Exit criteria: a small fixture set covers mono, Bayer, missing frame,
@@ -157,7 +157,7 @@ Last updated: 2026-06-28
 ## Next Suggested Order
 
 1. Explicit progress/cancel for export-all.
-2. Full-resolution export settings and high-bit-depth path.
-3. Metadata probe plus import validation UI.
+2. Metadata probe plus import validation UI.
+3. Preview navigation and inspection controls for large frames.
 4. Color pipeline design and DCP/profile lookup.
 5. Cache quota and user-facing diagnostics.

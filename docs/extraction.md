@@ -7,8 +7,8 @@ core.
 ## Included
 
 - `InputRecipe` / `ProjectMeta` subset needed by trichrome import artifacts.
-- Trichrome import grouping and stable JSON reports.
-- Metadata-policy hooks with a stub default probe.
+- Trichrome import grouping and project metadata structures.
+- File identity probes using size, mtime, and partial content hashes.
 - Artifact identity, source probes, preview/full tier signatures, and pipeline
   readiness guards.
 - Structure correlation diagnostics.
