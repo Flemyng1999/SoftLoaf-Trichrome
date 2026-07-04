@@ -1,6 +1,7 @@
 #include "trichrome_cache.hpp"
 
 #include <chrono>
+#include <cstdlib>
 #include <cstdint>
 #include <iomanip>
 #include <sstream>
@@ -39,6 +40,10 @@ std::string HexDigest(uint64_t h) {
 }
 
 std::filesystem::path CacheRoot() {
+    if (const char* override_root = std::getenv("SOFTLOAF_TRICHROME_CACHE_ROOT");
+        override_root && override_root[0] != '\0') {
+        return PathFromQString(QString::fromUtf8(override_root)) / "preview";
+    }
     QString root = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
     if (root.isEmpty()) root = QDir::tempPath() + "/SoftLoafTrichromeCache";
     return PathFromQString(root) / "preview";

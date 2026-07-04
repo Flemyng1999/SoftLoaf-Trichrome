@@ -2,6 +2,46 @@
 
 Date: 2026-07-01
 
+## 2026-07-04 Targeted RAW Compatibility Sync
+
+Goal: sync the confirmed SoftLoaf-Negative product RAW decode/admission fixes
+without importing the full Negative RAW sweep taxonomy or diagnostic-only compare
+changes.
+
+Product fixes synced:
+
+- Leica SL2 DNG matrix handling now has a built-in dcraw matrix override for the
+  Trichrome camera-to-XYZ metadata path. The matrix is implemented in
+  `include/softloaf_trichrome/raw_camera_matrix.hpp` and applied by
+  `src/desktop_decoder.cpp` before falling back to LibRaw `cam_xyz`.
+- Sony packed full-color admission is covered for the LibRaw shape
+  `filters=0 colors=3 color4_image=1`. Trichrome already classified this as
+  `packed_four_color` fallback; `tests/trichrome_smoke.cpp` now protects that
+  exact case and verifies that camera-native fallback remains allowed.
+- RAW policy/provenance identity includes the Leica SL2 matrix change so preview
+  cache and artifact identities do not silently reuse pre-override RAW metadata.
+
+Not changed:
+
+- No full RAW sweep was rerun or copied into this report.
+- No EXCLUDE/PARK strategy was changed for Nikon HE/TicoRAW, X3F/Foveon,
+  ARQ/Pixel Shift, CinemaDNG, float/processed DNG, Canon mRAW/sRAW, or
+  Phase/Leaf IIQ.
+- SoftLoaf-Negative `onda_rt_tap_compare --align-orientation` was not migrated:
+  Trichrome does not have the same staged RT tap compare tool, and that change
+  is diagnostic geometry alignment rather than a product RAW decode fix.
+
+Targeted verification:
+
+```bash
+cmake --build build --target trichrome_smoke trichrome_desktop_core_test softloaf_raw_probe
+ctest --test-dir build -R 'trichrome_smoke|trichrome_desktop_core' --output-on-failure
+```
+
+No Leica SL2 or Sony A1M2/FX2 packed sample was found at the documented local
+raw.pixls.us paths during this sync, so no new real-sample probe result is
+claimed here.
+
 ## 2026-07-01 RAW Boundary Update
 
 Goal: default RAW export/probe output remains a guarded linear Rec.2020 path,

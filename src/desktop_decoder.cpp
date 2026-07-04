@@ -25,6 +25,7 @@
 #include <opencv2/imgproc.hpp>
 
 #include "softloaf_trichrome/model.hpp"
+#include "softloaf_trichrome/raw_camera_matrix.hpp"
 #include "softloaf_trichrome/raw_classification.hpp"
 #include "softloaf_trichrome/raw_levels.hpp"
 #include "qt_path_utils.hpp"
@@ -57,6 +58,12 @@ void ConvertSrgbMatToLinear(cv::Mat* image) {
 }
 
 std::array<double, 9> CameraToXyzD50(const LibRaw& raw, bool* ok) {
+    if (const auto override = LeicaSl2CameraToXyzD50Override(
+            raw.imgdata.idata.make, raw.imgdata.idata.model)) {
+        if (ok) *ok = true;
+        return *override;
+    }
+
     std::array<double, 9> m = {};
     bool any = false;
     for (int r = 0; r < 3; ++r) {

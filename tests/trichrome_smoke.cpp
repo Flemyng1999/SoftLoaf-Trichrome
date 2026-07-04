@@ -8,6 +8,7 @@
 #include "softloaf_trichrome/composer.hpp"
 #include "softloaf_trichrome/color_management.hpp"
 #include "softloaf_trichrome/import.hpp"
+#include "softloaf_trichrome/raw_camera_matrix.hpp"
 #include "softloaf_trichrome/raw_classification.hpp"
 #include "softloaf_trichrome/raw_levels.hpp"
 #include "softloaf_trichrome/structure.hpp"
@@ -122,6 +123,16 @@ void TestRawSensorClassificationBoundaries() {
     assert(tri::LinearRec2020PolicyFor(tri::ClassifyRawSensor(packed_four)) ==
            tri::RawLinearRec2020Policy::kFallbackOnly);
 
+    tri::RawClassificationInput packed_four_sony_color4;
+    packed_four_sony_color4.filters = 0;
+    packed_four_sony_color4.colors = 3;
+    packed_four_sony_color4.has_color4_image = true;
+    assert(tri::ClassifyRawSensor(packed_four_sony_color4) ==
+           tri::RawSensorClass::kPackedFourColor);
+    assert(tri::RawDecodePolicyAllowsTarget(
+        tri::LinearRec2020PolicyFor(tri::ClassifyRawSensor(packed_four_sony_color4)),
+        tri::RawDecodeTarget::kCameraNativeLinear));
+
     tri::RawClassificationInput mono;
     mono.filters = 0;
     mono.colors = 1;
@@ -144,6 +155,19 @@ void TestRawSensorClassificationBoundaries() {
     assert(tri::ClassifyRawSensor(unknown) == tri::RawSensorClass::kUnknownFiltersZero);
     assert(tri::LinearRec2020PolicyFor(tri::ClassifyRawSensor(unknown)) ==
            tri::RawLinearRec2020Policy::kUnsupported);
+}
+
+void TestLeicaSl2CameraMatrixOverride() {
+    const auto matrix = tri::LeicaSl2CameraToXyzD50Override("Leica Camera AG", "SL2");
+    assert(matrix.has_value());
+    AssertMatrixClose(
+        *matrix,
+        {0.5098656859, 0.3875956683, 0.0667586458,
+         0.2104797198, 0.8198900124, -0.0303697322,
+         0.0180066179, -0.0945648437, 0.9017682258},
+        2e-8);
+    assert(tri::LeicaSl2CameraToXyzD50Override("Leica Camera AG", "SL2-S") ==
+           std::nullopt);
 }
 
 void TestRawDecodeProvenanceMapping() {
@@ -221,6 +245,7 @@ int main() {
     TestColourScienceReferenceMatrices();
     TestLargeExportSpacesRemainLinear();
     TestRawSensorClassificationBoundaries();
+    TestLeicaSl2CameraMatrixOverride();
     TestRawDecodeProvenanceMapping();
     TestArtifactIdentityIncludesRawProvenancePolicy();
 

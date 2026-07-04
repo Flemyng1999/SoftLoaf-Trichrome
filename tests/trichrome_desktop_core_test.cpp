@@ -220,6 +220,9 @@ int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);
     QCoreApplication::setApplicationName("SoftLoafTrichromeTest");
     QCoreApplication::setOrganizationName("SoftLoaf");
+    qputenv("SOFTLOAF_TRICHROME_CACHE_ROOT",
+            desktop::QStringFromPath(fs::temp_directory_path() /
+                                      "softloaf_trichrome_test_cache_root").toUtf8());
 
     TestObsLogSink();
     TestPreviewCacheIdentityAndHit();

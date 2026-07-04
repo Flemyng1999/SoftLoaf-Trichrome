@@ -135,6 +135,18 @@ inline constexpr std::array<const RgbColorSpace*, 9> kExportColorSpaces{
     &kAcesCgLinear,
 };
 
+inline constexpr Mat3 kXyzD50FromSrgbD50{
+    0.4360747, 0.3850649, 0.1430804,
+    0.2225045, 0.7168786, 0.0606169,
+    0.0139322, 0.0971045, 0.7141733,
+};
+
+inline constexpr Mat3 kRtLegacyXyzD65FromSrgbD65{
+    0.412453, 0.357580, 0.180423,
+    0.212671, 0.715160, 0.072169,
+    0.019334, 0.119193, 0.950227,
+};
+
 inline const RgbColorSpace* LookupColorSpace(std::string_view id) {
     for (const RgbColorSpace* space : kExportColorSpaces) {
         if (space->id == id) return space;
