@@ -112,7 +112,7 @@ inline std::optional<RawCropHint> ProcessedRawCropHint(
 inline std::string RawDecodeHintSummary(const RawDecodeHintInput& input) {
     std::string out;
     const auto append = [&](const char* label) {
-        if (!out.empty()) out.push_back(',');
+        if (!out.empty()) out.push_back(';');
         out.append(label);
     };
     if (SonyPackedFullColorBlackHint(input))

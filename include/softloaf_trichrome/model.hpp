@@ -251,7 +251,7 @@ inline std::string LowerExtension(std::filesystem::path path) {
 inline bool IsRawLikeExtension(const std::string& ext) {
     static const std::vector<std::string> kRawExts = {
         ".3fr", ".fff", ".dng", ".arw", ".cr2", ".cr3", ".nef", ".raf",
-        ".raw", ".rw2", ".orf", ".pef", ".srw", ".tif", ".tiff"};
+        ".raw", ".rw2", ".orf", ".pef", ".srw", ".x3f", ".tif", ".tiff"};
     return std::find(kRawExts.begin(), kRawExts.end(), ext) != kRawExts.end();
 }
 

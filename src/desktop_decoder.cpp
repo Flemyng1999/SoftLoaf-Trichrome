@@ -103,6 +103,42 @@ RawDecodeHintInput RawDecodeHintsFromLibRaw(const LibRaw& raw) {
     return input;
 }
 
+std::string CameraMatrixSourceFromLibRaw(const LibRaw& raw) {
+    return LeicaSl2CameraToXyzD50Override(raw.imgdata.idata.make,
+                                          raw.imgdata.idata.model)
+        ? "builtin_leica_sl2_dcraw_matrix_v1"
+        : "libraw_cam_xyz";
+}
+
+void FillRawProbeMetadata(const LibRaw& raw, RawProvenanceProbeResult* result) {
+    if (!result) return;
+    result->make = raw.imgdata.idata.make;
+    result->model = raw.imgdata.idata.model;
+    result->matrix_source = CameraMatrixSourceFromLibRaw(raw);
+    result->filters = raw.imgdata.idata.filters;
+    result->colors = raw.imgdata.idata.colors;
+    result->has_raw_image = raw.imgdata.rawdata.raw_image != nullptr;
+    result->has_color3_image = raw.imgdata.rawdata.color3_image != nullptr;
+    result->has_color4_image = raw.imgdata.rawdata.color4_image != nullptr;
+    result->has_float3_image = raw.imgdata.rawdata.float3_image != nullptr;
+    result->has_float4_image = raw.imgdata.rawdata.float4_image != nullptr;
+    result->black = raw.imgdata.color.black;
+    for (size_t i = 0; i < result->cblack.size(); ++i)
+        result->cblack[i] = raw.imgdata.color.cblack[i];
+    for (size_t i = 0; i < result->linear_max.size(); ++i)
+        result->linear_max[i] = raw.imgdata.color.linear_max[i];
+    result->maximum = raw.imgdata.color.maximum;
+    result->data_maximum = raw.imgdata.color.data_maximum;
+    result->raw_width = raw.imgdata.sizes.raw_width;
+    result->raw_height = raw.imgdata.sizes.raw_height;
+    result->visible_width = raw.imgdata.sizes.iwidth > 0
+        ? raw.imgdata.sizes.iwidth
+        : raw.imgdata.sizes.width;
+    result->visible_height = raw.imgdata.sizes.iheight > 0
+        ? raw.imgdata.sizes.iheight
+        : raw.imgdata.sizes.height;
+}
+
 void ConfigureRawDecodeParams(LibRaw* raw, DecodeMode decode_mode) {
     raw->imgdata.params.output_color = 0;
     raw->imgdata.params.output_bps = 16;
@@ -434,10 +470,12 @@ RawProvenanceProbeResult ProbeRawProvenance(const std::filesystem::path& path,
         return result;
     }
 #endif
+    FillRawProbeMetadata(*raw, &result);
     if (raw->unpack() != LIBRAW_SUCCESS) {
         result.reason = "raw_unpack_failed";
         return result;
     }
+    FillRawProbeMetadata(*raw, &result);
     const RawSensorClass raw_class =
         ClassifyRawSensor(RawClassificationFromLibRaw(*raw));
     result.sensor_hints = RawDecodeHintSummary(RawDecodeHintsFromLibRaw(*raw));
