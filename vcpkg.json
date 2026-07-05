@@ -21,6 +21,7 @@
     },
     "qtbase",
     "qtdeclarative",
+    "qtimageformats",
     "qttools"
   ]
 }

@@ -5,7 +5,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$InstallRoot,
 
-    [string]$Version = "0.2.0-beta.2",
+    [string]$Version = "0.2.0-beta.3",
     [string]$OutDir = "",
     [string]$Configuration = "Release",
     [string]$AppName = "SoftLoaf Trichrome",
@@ -25,6 +25,31 @@ function Copy-IfExists([string]$Source, [string]$Destination) {
     if (Test-Path -LiteralPath $Source) {
         Copy-Item -LiteralPath $Source -Destination $Destination -Force
     }
+}
+
+function Copy-RequiredQtPlugin([string]$RelativePluginPath) {
+    $candidateRoots = @()
+    if (-not [string]::IsNullOrWhiteSpace($env:QT_ROOT_DIR)) {
+        $candidateRoots += $env:QT_ROOT_DIR
+    }
+    if ($Windeployqt) {
+        $candidateRoots += (Resolve-PathStrict (Join-Path -Path (Split-Path -Parent $Windeployqt) -ChildPath ".."))
+    }
+    $candidateRoots += $InstallRoot
+
+    $source = $candidateRoots |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+        ForEach-Object { Join-Path -Path $_ -ChildPath (Join-Path -Path "plugins" -ChildPath $RelativePluginPath) } |
+        Where-Object { Test-Path -LiteralPath $_ } |
+        Select-Object -First 1
+
+    if (-not $source) {
+        throw "Required Qt plugin not found: $RelativePluginPath. Install the Qt Image Formats module."
+    }
+
+    $destination = Join-Path -Path $PortableDir -ChildPath $RelativePluginPath
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $destination) | Out-Null
+    Copy-Item -LiteralPath $source -Destination $destination -Force
 }
 
 function Invoke-CodeSign([string]$PathValue) {
@@ -134,6 +159,8 @@ if (Test-Path -LiteralPath $TripletBin) {
 if ($LASTEXITCODE -ne 0) {
     throw "windeployqt failed"
 }
+
+Copy-RequiredQtPlugin "imageformats\qtiff.dll"
 
 Get-ChildItem -LiteralPath $PortableDir -Recurse -Include *.exe,*.dll |
     ForEach-Object { Invoke-CodeSign $_.FullName }

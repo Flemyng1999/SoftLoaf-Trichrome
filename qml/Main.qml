@@ -20,6 +20,119 @@ ApplicationWindow {
     palette.buttonText: "#f4f0e8"
     palette.highlight: "#4cbf88"
 
+    property var selectedGroups: []
+    property int selectionAnchorGroup: -1
+
+    function completeGroupIndexes() {
+        var indexes = []
+        for (var i = 0; i < trichromeController.groups.length; ++i) {
+            var group = trichromeController.groups[i]
+            if (group.complete)
+                indexes.push(group.index)
+        }
+        return indexes
+    }
+
+    function setFrameSelection(indexes, anchorIndex) {
+        var unique = {}
+        var next = []
+        for (var i = 0; i < indexes.length; ++i) {
+            var index = indexes[i]
+            if (index < 0 || unique[index])
+                continue
+            unique[index] = true
+            next.push(index)
+        }
+        next.sort(function(a, b) { return a - b })
+        selectedGroups = next
+        selectionAnchorGroup = anchorIndex === undefined ? (next.length > 0 ? next[next.length - 1] : -1) : anchorIndex
+    }
+
+    function clearFrameSelection() {
+        selectedGroups = []
+        selectionAnchorGroup = -1
+    }
+
+    function selectAllFrames() {
+        var indexes = completeGroupIndexes()
+        setFrameSelection(indexes, indexes.length > 0 ? indexes[0] : -1)
+        if (trichromeController.activeGroup < 0 && indexes.length > 0)
+            trichromeController.setActiveGroup(indexes[0])
+    }
+
+    function frameIsSelected(index) {
+        return selectedGroups.indexOf(index) !== -1
+    }
+
+    function selectFrameRange(fromIndex, toIndex) {
+        var first = Math.min(fromIndex, toIndex)
+        var last = Math.max(fromIndex, toIndex)
+        var indexes = []
+        for (var i = 0; i < trichromeController.groups.length; ++i) {
+            var group = trichromeController.groups[i]
+            if (group.complete && group.index >= first && group.index <= last)
+                indexes.push(group.index)
+        }
+        setFrameSelection(indexes, fromIndex)
+    }
+
+    function handleFrameClick(index, shiftPressed) {
+        if (shiftPressed && selectionAnchorGroup >= 0)
+            selectFrameRange(selectionAnchorGroup, index)
+        else
+            setFrameSelection([index], index)
+        trichromeController.setActiveGroup(index)
+    }
+
+    function pruneFrameSelection() {
+        if (selectedGroups.length === 0)
+            return
+        var available = {}
+        for (var i = 0; i < trichromeController.groups.length; ++i) {
+            var group = trichromeController.groups[i]
+            if (group.complete)
+                available[group.index] = true
+        }
+        var next = []
+        for (var j = 0; j < selectedGroups.length; ++j) {
+            var selected = selectedGroups[j]
+            if (available[selected])
+                next.push(selected)
+        }
+        if (available[selectionAnchorGroup])
+            setFrameSelection(next, selectionAnchorGroup)
+        else
+            setFrameSelection(next)
+    }
+
+    Component.onCompleted: {
+        if (trichromeController.activeGroup >= 0)
+            setFrameSelection([trichromeController.activeGroup], trichromeController.activeGroup)
+    }
+
+    Connections {
+        target: trichromeController
+
+        function onGroupsChanged() {
+            root.pruneFrameSelection()
+        }
+    }
+
+    Shortcut {
+        sequence: StandardKey.SelectAll
+        onActivated: root.selectAllFrames()
+    }
+
+    Shortcut {
+        sequence: "Ctrl+Shift+A"
+        onActivated: root.clearFrameSelection()
+    }
+
+    Shortcut {
+        sequence: "Meta+Shift+A"
+        onActivated: root.clearFrameSelection()
+    }
+
     ExportWindow {
         id: exportWindow
     }
@@ -51,11 +164,22 @@ ApplicationWindow {
                         anchors.rightMargin: 20
                         spacing: 6
 
-                        Text {
-                            text: "SoftLoaf Trichrome"
-                            color: "#f4f0e8"
-                            font.pixelSize: 21
-                            font.bold: true
+                        Row {
+                            spacing: 5
+
+                            Text {
+                                text: "SoftLoaf"
+                                color: "#f4f0e8"
+                                font.pixelSize: 21
+                                font.bold: true
+                            }
+
+                            Text {
+                                text: "Trichrome"
+                                color: "#f4f0e8"
+                                font.pixelSize: 21
+                                font.bold: true
+                            }
                         }
 
                         Text {
@@ -87,30 +211,67 @@ ApplicationWindow {
                         }
                     }
 
-                    Label {
-                        text: "Sensor"
-                        color: "#aab2bb"
-                        font.pixelSize: 12
-                    }
-
                     RowLayout {
                         Layout.fillWidth: true
-                        spacing: 8
+                        spacing: 10
 
-                        ThemedButton {
-                            Layout.fillWidth: true
-                            text: "Bayer"
-                            checkable: true
-                            checked: trichromeController.sensorMode === "bayer"
-                            onClicked: trichromeController.sensorMode = "bayer"
+                        Label {
+                            text: "Sensor"
+                            color: "#aab2bb"
+                            font.pixelSize: 12
+                            Layout.preferredWidth: 80
                         }
 
-                        ThemedButton {
+                        Rectangle {
                             Layout.fillWidth: true
-                            text: "Monochrome"
-                            checkable: true
-                            checked: trichromeController.sensorMode === "mono"
-                            onClicked: trichromeController.sensorMode = "mono"
+                            Layout.preferredHeight: 34
+                            radius: 7
+                            color: "#171a1d"
+                            border.color: "#343a40"
+                            border.width: 1
+                            clip: true
+
+                            Row {
+                                anchors.fill: parent
+                                anchors.margins: 3
+
+                                Repeater {
+                                    model: [
+                                        { text: "Bayer", value: "bayer" },
+                                        { text: "Monochrome", value: "mono" }
+                                    ]
+
+                                    delegate: Rectangle {
+                                        required property var modelData
+                                        readonly property bool selected: trichromeController.sensorMode === modelData.value
+
+                                        width: parent.width / 2
+                                        height: parent.height
+                                        radius: 5
+                                        color: selected ? "#244f3d" : "transparent"
+                                        border.color: selected ? "#4cbf88" : "transparent"
+                                        border.width: 1
+
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: modelData.text
+                                            color: selected ? "#f4f0e8" : "#d6d0c8"
+                                            font.pixelSize: 12
+                                            font.bold: selected
+                                            horizontalAlignment: Text.AlignHCenter
+                                            verticalAlignment: Text.AlignVCenter
+                                            elide: Text.ElideRight
+                                            width: parent.width - 16
+                                        }
+
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: trichromeController.sensorMode = modelData.value
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -170,10 +331,40 @@ ApplicationWindow {
                         Layout.fillWidth: true
                     }
 
-                    Text {
-                        text: trichromeController.groups.length
-                        color: "#aab2bb"
-                        font.pixelSize: 13
+                    RowLayout {
+                        spacing: 8
+
+                        Rectangle {
+                            Layout.preferredWidth: 76
+                            Layout.preferredHeight: 4
+                            radius: 2
+                            color: "#2a2f34"
+                            visible: trichromeController.completeGroupCount > 0
+
+                            Rectangle {
+                                anchors.left: parent.left
+                                anchors.top: parent.top
+                                anchors.bottom: parent.bottom
+                                width: parent.width * (
+                                    trichromeController.completeGroupCount > 0
+                                        ? trichromeController.previewReadyCount /
+                                          trichromeController.completeGroupCount
+                                        : 0)
+                                radius: 2
+                                color: "#4cbf88"
+                            }
+                        }
+
+                        Text {
+                            text: trichromeController.completeGroupCount > 0
+                                ? trichromeController.previewReadyCount + "/" +
+                                  trichromeController.completeGroupCount
+                                : trichromeController.groups.length
+                            color: "#aab2bb"
+                            font.pixelSize: 13
+                            horizontalAlignment: Text.AlignRight
+                            Layout.preferredWidth: 34
+                        }
                     }
                 }
 
@@ -188,19 +379,36 @@ ApplicationWindow {
                     spacing: 8
                     model: trichromeController.groups
 
+                    TapHandler {
+                        acceptedButtons: Qt.LeftButton
+                        onTapped: function(point) {
+                            if (groupList.indexAt(point.position.x, point.position.y) < 0)
+                                root.clearFrameSelection()
+                        }
+                    }
+
                     delegate: Rectangle {
+                        id: frameDelegate
                         required property var modelData
+                        property bool selected: root.frameIsSelected(modelData.index)
                         width: ListView.view.width
                         height: 106
                         radius: 8
-                        color: modelData.index === trichromeController.activeGroup ? "#202a25" : "#202429"
-                        border.color: modelData.index === trichromeController.activeGroup ? "#4cbf88" : "#343a40"
+                        color: selected ? "#202a25" : "#202429"
+                        border.color: selected ? "#4cbf88" : "#343a40"
                         border.width: 1
+                        property bool hovered: frameMouse.containsMouse || deleteMouse.containsMouse
 
                         MouseArea {
+                            id: frameMouse
                             anchors.fill: parent
+                            hoverEnabled: true
                             enabled: modelData.complete
-                            onClicked: trichromeController.setActiveGroup(modelData.index)
+                            onClicked: function(mouse) {
+                                root.handleFrameClick(
+                                    modelData.index,
+                                    (mouse.modifiers & Qt.ShiftModifier) !== 0)
+                            }
                         }
 
                         Column {
@@ -253,6 +461,56 @@ ApplicationWindow {
                                 }
                             }
                         }
+
+                        Rectangle {
+                            id: deleteButton
+                            width: 24
+                            height: 24
+                            radius: 12
+                            anchors.top: parent.top
+                            anchors.right: parent.right
+                            anchors.topMargin: 8
+                            anchors.rightMargin: 8
+                            color: deleteMouse.containsMouse ? "#343a40" : "#2a2f34"
+                            border.color: deleteMouse.containsMouse ? "#4cbf88" : "#424950"
+                            border.width: 1
+                            opacity: frameDelegate.hovered || frameDelegate.selected ? 1 : 0
+                            visible: opacity > 0
+                            z: 2
+
+                            Behavior on opacity {
+                                NumberAnimation { duration: 90 }
+                            }
+
+                            Rectangle {
+                                anchors.centerIn: parent
+                                width: 13
+                                height: 2
+                                radius: 1
+                                color: "#f4f0e8"
+                                rotation: 45
+                            }
+
+                            Rectangle {
+                                anchors.centerIn: parent
+                                width: 13
+                                height: 2
+                                radius: 1
+                                color: "#f4f0e8"
+                                rotation: -45
+                            }
+
+                            MouseArea {
+                                id: deleteMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                acceptedButtons: Qt.LeftButton
+                                onClicked: function(mouse) {
+                                    mouse.accepted = true
+                                    trichromeController.deleteGroup(modelData.index)
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -291,7 +549,8 @@ ApplicationWindow {
                                 ? trichromeController.exportProgressText
                                 : trichromeController.hasPreview
                                 ? "Composite preview"
-                                : "Load a complete R/G/B group"
+                                : ""
+                            visible: text.length > 0
                             color: "#f4f0e8"
                             font.pixelSize: 17
                             font.bold: true

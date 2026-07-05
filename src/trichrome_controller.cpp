@@ -124,17 +124,8 @@ struct ExportTaskResult {
     QString status;
 };
 
-QString NormalizeExportFormat(QString format) {
-    format = format.trimmed().toLower();
-    if (format == "tif") return "tiff";
-    if (format == "dng" || format == "tiff") return format;
+QString NormalizeExportFormat(QString) {
     return "tiff";
-}
-
-QString UnsupportedExportFormatReason(const QString& format) {
-    if (format == "dng")
-        return QStringLiteral("DNG export is not supported yet. Choose TIFF.");
-    return {};
 }
 
 QString NormalizeExportColorSpace(QString color_space) {
@@ -172,18 +163,15 @@ QString NormalizeExportColorSpace(QString color_space) {
     return "aces_ap0_linear";
 }
 
-int NormalizeExportBitDepth(const QString& format, int bit_depth) {
-    (void)format;
+int NormalizeExportBitDepth(int bit_depth) {
     return bit_depth >= 16 ? 16 : 8;
 }
 
-QByteArray ExportFormatName(const QString& format) {
-    (void)format;
+QByteArray ExportFormatName() {
     return QByteArrayLiteral("tiff");
 }
 
-QString ExportExtension(const QString& format) {
-    if (format == "dng") return "dng";
+QString ExportExtension() {
     return "tiff";
 }
 
@@ -265,11 +253,20 @@ QImage LinearRgbToQImage(const ImageBuf& image,
     return out;
 }
 
-bool WriteExportImage(QImage image,
+bool WriteExportImage(const QImage& image,
                       const QString& path,
                       const TrichromeController::ExportSettings& settings,
                       QString* reason) {
-    QImageWriter writer(path, ExportFormatName(settings.format));
+    const QByteArray format_name = ExportFormatName();
+    const QList<QByteArray> supported_formats = QImageWriter::supportedImageFormats();
+    if (!supported_formats.contains(format_name)) {
+        if (reason) {
+            *reason = QString("%1 export unavailable: Qt image format plugin is missing")
+                .arg(QString::fromLatin1(format_name).toUpper());
+        }
+        return false;
+    }
+    QImageWriter writer(path, format_name);
     if (!writer.write(image)) {
         if (reason) *reason = writer.errorString();
         return false;
@@ -289,12 +286,22 @@ ComposeResult ComposeGroupSequential(const ProjectTrichromeGroup& group,
     };
     std::vector<DecodedSource> decoded_sources;
     decoded_sources.reserve(group.sources.size());
+    std::vector<DecodedSource> bayer_cross_check_sources;
+    if (bayer) bayer_cross_check_sources.reserve(group.sources.size());
     try {
         for (const ProjectTrichromeSource& source : group.sources) {
-            decoded_sources.push_back(
-                {source.role,
-                 DecodeLinear(PathFromQString(QString::fromUtf8(source.path)), force_mono,
-                              decode_mode)});
+            ImageBuf image = DecodeLinear(
+                PathFromQString(QString::fromUtf8(source.path)), force_mono,
+                decode_mode);
+            if (bayer) {
+                const int channel = ExpectedChannelForRole(source.role);
+                if (channel >= 0) {
+                    bayer_cross_check_sources.push_back(
+                        {source.role, ResizeLongEdge(image, 1024)});
+                    image = ExtractRgbChannel(image, channel);
+                }
+            }
+            decoded_sources.push_back({source.role, std::move(image)});
         }
     } catch (...) {
         result.reason = "compose_decode_exception";
@@ -303,17 +310,14 @@ ComposeResult ComposeGroupSequential(const ProjectTrichromeGroup& group,
 
     if (bayer) {
         const ImageBuf* role_imgs[3] = {nullptr, nullptr, nullptr};
-        for (const DecodedSource& ds : decoded_sources) {
+        for (const DecodedSource& ds : bayer_cross_check_sources) {
             const int ch = ExpectedChannelForRole(ds.role);
             if (ch >= 0 && ch < 3) role_imgs[ch] = &ds.image;
         }
         if (role_imgs[0] && role_imgs[1] && role_imgs[2]) {
             std::string cross_reason;
-            if (!CheckBayerRolesCrossFrame(
-                    ResizeLongEdge(*role_imgs[0], 1024),
-                    ResizeLongEdge(*role_imgs[1], 1024),
-                    ResizeLongEdge(*role_imgs[2], 1024),
-                    &result.warnings, &cross_reason)) {
+            if (!CheckBayerRolesCrossFrame(*role_imgs[0], *role_imgs[1], *role_imgs[2],
+                                           &result.warnings, &cross_reason)) {
                 result.reason = cross_reason;
                 return result;
             }
@@ -324,8 +328,6 @@ ComposeResult ComposeGroupSequential(const ProjectTrichromeGroup& group,
     ImageBuf green;
     ImageBuf blue;
     for (DecodedSource& source : decoded_sources) {
-        if (bayer)
-            source.image = ExtractRgbChannel(source.image, ExpectedChannelForRole(source.role));
         if (source.role == "red") red = std::move(source.image);
         else if (source.role == "green") green = std::move(source.image);
         else if (source.role == "blue") blue = std::move(source.image);
@@ -462,6 +464,7 @@ void TrichromeController::chooseImport() {
         active_group_ = -1;
         preview_source_.clear();
         current_preview_ = QImage();
+        resetPreviewReadiness(0);
         if (image_provider_) image_provider_->clearPreview();
         emit groupsChanged();
         emit activeGroupChanged();
@@ -505,6 +508,7 @@ void TrichromeController::clear() {
     active_group_ = -1;
     preview_source_.clear();
     current_preview_ = QImage();
+    resetPreviewReadiness(0);
     if (image_provider_) image_provider_->clearPreview();
     setStatus("No photos loaded");
     emit groupsChanged();
@@ -521,6 +525,54 @@ void TrichromeController::setActiveGroup(int index) {
     emit activeGroupChanged();
     emit previewChanged();
     composeActive();
+}
+
+void TrichromeController::deleteGroup(int index) {
+    if (index < 0) return;
+    const int first_source = index * 3;
+    if (first_source >= static_cast<int>(files_.size())) return;
+
+    ++compose_generation_;
+    ++process_generation_;
+    ++export_generation_;
+    setExportProgress(false, 0, 0, {});
+    for (const QPointer<QThread>& worker : workers_) {
+        if (worker) worker->requestInterruption();
+    }
+
+    const int remove_count =
+        std::min(3, static_cast<int>(files_.size()) - first_source);
+    files_.erase(files_.begin() + first_source,
+                 files_.begin() + first_source + remove_count);
+
+    const bool deleted_active = active_group_ == index;
+    if (active_group_ > index) {
+        --active_group_;
+    }
+
+    const int complete_groups = static_cast<int>(files_.size()) / 3;
+    if (complete_groups == 0) {
+        active_group_ = -1;
+    } else if (active_group_ < 0 || active_group_ >= complete_groups) {
+        active_group_ = std::min(index, complete_groups - 1);
+    }
+
+    if (deleted_active || active_group_ < 0) {
+        preview_source_.clear();
+        current_preview_ = QImage();
+        if (image_provider_) image_provider_->clearPreview();
+    }
+
+    rebuildGroupModel();
+    emit activeGroupChanged();
+    emit previewChanged();
+    setStatus(QString("Deleted frame %1").arg(index + 1));
+    ObsLog("command.accepted", {{"command", "DeleteFrame"},
+                                {"group", std::to_string(index)},
+                                {"removed_sources", std::to_string(remove_count)}});
+
+    if (active_group_ >= 0 && deleted_active) composeActive();
+    startBackgroundFrameProcessing();
 }
 
 void TrichromeController::composeActive() {
@@ -567,12 +619,14 @@ void TrichromeController::composeActive() {
             if (task_result.ok) {
                 self->preview_source_ = self->publishPreview(task_result.image);
                 self->current_preview_ = task_result.image;
+                self->markPreviewReady(task_result.group_index, true);
                 ObsLog("display.preview", {{"event", "publish"},
                                            {"generation", std::to_string(task_result.generation)},
                                            {"source", "image_provider"}});
             } else {
                 self->preview_source_.clear();
                 self->current_preview_ = QImage();
+                self->markPreviewReady(task_result.group_index, false);
                 if (self->image_provider_) self->image_provider_->clearPreview();
             }
             emit self->previewChanged();
@@ -609,14 +663,8 @@ void TrichromeController::startExport(const QUrl& folder_url,
     ExportSettings settings;
     settings.format = NormalizeExportFormat(format);
     settings.color_space = NormalizeExportColorSpace(color_space);
-    settings.bit_depth = NormalizeExportBitDepth(settings.format, bit_depth);
+    settings.bit_depth = NormalizeExportBitDepth(bit_depth);
     settings.name_suffix = NormalizeExportNameSuffix(name_suffix);
-    const QString unsupported_reason = UnsupportedExportFormatReason(settings.format);
-    if (!unsupported_reason.isEmpty()) {
-        setExportProgress(false, 0, 0, unsupported_reason);
-        setStatus(unsupported_reason);
-        return;
-    }
     requestBackgroundFrameProcessingStop();
     if (export_all)
         exportAllTo(folder, settings);
@@ -680,11 +728,13 @@ void TrichromeController::exportActiveTo(const QString& folder, const ExportSett
         result.total = 1;
         QString reason;
         const QString out = UniqueExportPathForGroup(
-            folder, group, ExportExtension(settings.format), settings.name_suffix);
+            folder, group, ExportExtension(), settings.name_suffix);
         const QImage image = ComposeGroupToEncodedImage(
             group, sensor_mode, DecodeMode::kExport, 0,
             settings.color_space, settings.bit_depth, &reason);
-        if (image.isNull()) {
+        if (QThread::currentThread()->isInterruptionRequested()) {
+            result.status = "Export canceled";
+        } else if (image.isNull()) {
             result.status = reason;
         } else {
             if (self) {
@@ -781,6 +831,10 @@ void TrichromeController::exportAllTo(const QString& folder, const ExportSetting
         result.total = static_cast<int>(groups.size());
         QSet<QString> reserved_paths;
         for (size_t i = 0; i < groups.size(); ++i) {
+            if (QThread::currentThread()->isInterruptionRequested()) {
+                result.status = "Export canceled";
+                break;
+            }
             if (self) {
                 const int frame = static_cast<int>(i) + 1;
                 const int total = static_cast<int>(groups.size());
@@ -794,11 +848,15 @@ void TrichromeController::exportAllTo(const QString& folder, const ExportSetting
             }
             QString reason;
             const QString out = UniqueExportPathForGroup(
-                folder, groups[i], ExportExtension(settings.format),
+                folder, groups[i], ExportExtension(),
                 settings.name_suffix, &reserved_paths);
             const QImage image = ComposeGroupToEncodedImage(
                 groups[i], sensor_mode, DecodeMode::kExport, 0,
                 settings.color_space, settings.bit_depth, &reason);
+            if (QThread::currentThread()->isInterruptionRequested()) {
+                result.status = "Export canceled";
+                break;
+            }
             if (image.isNull()) {
                 result.status = QString("Frame %1: %2").arg(i + 1).arg(reason);
                 break;
@@ -916,6 +974,47 @@ void TrichromeController::setExportProgress(bool exporting,
     emit exportProgressChanged();
 }
 
+int TrichromeController::previewReadyCount() const {
+    return static_cast<int>(std::count(preview_ready_groups_.begin(),
+                                       preview_ready_groups_.end(), true));
+}
+
+void TrichromeController::setProcessProgress(bool active, int current, int total) {
+    current = std::max(0, current);
+    total = std::max(0, total);
+    if (total > 0) current = std::min(current, total);
+    if (process_progress_active_ == active &&
+        process_progress_current_ == current &&
+        process_progress_total_ == total) {
+        return;
+    }
+    process_progress_active_ = active;
+    process_progress_current_ = current;
+    process_progress_total_ = total;
+    emit processProgressChanged();
+}
+
+void TrichromeController::resetPreviewReadiness(int total) {
+    total = std::max(0, total);
+    if (static_cast<int>(preview_ready_groups_.size()) == total &&
+        std::none_of(preview_ready_groups_.begin(), preview_ready_groups_.end(),
+                     [](bool ready) { return ready; })) {
+        return;
+    }
+    preview_ready_groups_.assign(total, false);
+    emit processProgressChanged();
+}
+
+void TrichromeController::markPreviewReady(int group_index, bool ready) {
+    if (group_index < 0 ||
+        group_index >= static_cast<int>(preview_ready_groups_.size()) ||
+        preview_ready_groups_[group_index] == ready) {
+        return;
+    }
+    preview_ready_groups_[group_index] = ready;
+    emit processProgressChanged();
+}
+
 void TrichromeController::addFiles(std::vector<std::filesystem::path> paths) {
     bool changed = false;
     for (std::filesystem::path& path : paths) {
@@ -954,6 +1053,7 @@ void TrichromeController::cancelAndDrainWorkers(int timeout_ms) {
     ++process_generation_;
     ++export_generation_;
     setExportProgress(false, 0, 0, {});
+    setProcessProgress(false, 0, 0);
     ObsLog("worker.drain", {{"event", "start"},
                             {"active", std::to_string(active_workers_)}});
     const auto snapshot = workers_;
@@ -977,6 +1077,7 @@ void TrichromeController::requestBackgroundFrameProcessingStop() {
         if (worker && worker->objectName() == "ProcessImportedFramesWorker")
             worker->requestInterruption();
     }
+    setProcessProgress(false, process_progress_current_, process_progress_total_);
     ObsLog("worker.interrupt", {{"task", "ProcessImportedFrames"},
                                 {"reason", "export_requested"}});
 }
@@ -987,11 +1088,16 @@ void TrichromeController::shutdown() {
 
 void TrichromeController::startBackgroundFrameProcessing() {
     const int complete_groups = static_cast<int>(files_.size()) / 3;
-    if (complete_groups <= 0) return;
+    resetPreviewReadiness(complete_groups);
+    if (complete_groups <= 0) {
+        setProcessProgress(false, 0, 0);
+        return;
+    }
     for (int i = 0; i < complete_groups; ++i) {
         for (const auto& path : pathsForGroup(i)) {
             if (!PathExists(path)) {
                 setStatus("Frame has missing sources");
+                setProcessProgress(false, 0, complete_groups);
                 return;
             }
         }
@@ -1027,6 +1133,7 @@ void TrichromeController::startBackgroundFrameProcessing() {
                                 {"memory_gib", std::to_string(physical_memory / kGiB)},
                                 {"cpu_bound", std::to_string(cpu_bound)},
                                 {"memory_bound", std::to_string(memory_bound)}});
+    setProcessProgress(true, 0, complete_groups);
     setStatus(QString("Processing 0/%1 frames").arg(complete_groups));
 
     QPointer<TrichromeController> self(this);
@@ -1075,11 +1182,14 @@ void TrichromeController::startBackgroundFrameProcessing() {
                                         {"group", std::to_string(task_result.group_index)},
                                         {"source", "background_cache"}});
                             }
+                            self->markPreviewReady(task_result.group_index, task_result.ok);
                             if (task_result.ok) {
+                                self->setProcessProgress(true, processed_count, total);
                                 self->setStatus(QString("Processed %1/%2 frames")
                                                     .arg(processed_count)
                                                     .arg(total));
                             } else {
+                                self->setProcessProgress(true, processed_count, total);
                                 self->setStatus(QString("Frame %1: %2")
                                                     .arg(task_result.group_index + 1)
                                                     .arg(task_result.status));
@@ -1112,7 +1222,10 @@ void TrichromeController::startBackgroundFrameProcessing() {
                             return;
                         }
                         if (all_ok) {
+                            self->setProcessProgress(false, total, total);
                             self->setStatus(QString("Processed %1 frames").arg(total));
+                        } else {
+                            self->setProcessProgress(false, processed_count, total);
                         }
                         ObsLog("task.finished", {{"task", "ProcessImportedFrames"},
                                                  {"generation", std::to_string(generation)},
