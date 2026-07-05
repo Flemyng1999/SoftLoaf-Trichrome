@@ -10,6 +10,7 @@
 #include "softloaf_trichrome/import.hpp"
 #include "softloaf_trichrome/raw_camera_matrix.hpp"
 #include "softloaf_trichrome/raw_classification.hpp"
+#include "softloaf_trichrome/raw_decode_hints.hpp"
 #include "softloaf_trichrome/raw_levels.hpp"
 #include "softloaf_trichrome/structure.hpp"
 
@@ -170,6 +171,46 @@ void TestLeicaSl2CameraMatrixOverride() {
            std::nullopt);
 }
 
+void TestRawDecodeCameraHints() {
+    tri::RawDecodeHintInput sony_packed;
+    sony_packed.make = "SONY";
+    sony_packed.model = "ILCE-7M4";
+    sony_packed.filters = 0;
+    sony_packed.colors = 3;
+    sony_packed.has_raw_image = false;
+    sony_packed.has_color4_image = true;
+    sony_packed.black = 1024;
+    assert(tri::IsSonyPackedFullColorColor4(sony_packed));
+    assert(tri::SonyPackedFullColorBlackHint(sony_packed).value() == 512u);
+    assert(tri::RawDecodeHintSummary(sony_packed) == "sony_packed_color4_black_v1");
+
+    tri::RawDecodeHintInput sony_control = sony_packed;
+    sony_control.has_raw_image = true;
+    assert(!tri::SonyPackedFullColorBlackHint(sony_control).has_value());
+
+    tri::RawDecodeHintInput canon70d;
+    canon70d.make = "Canon";
+    canon70d.model = "EOS 70D";
+    canon70d.filters = 0;
+    canon70d.colors = 3;
+    canon70d.has_color4_image = true;
+    assert(tri::Canon70DReducedRawWhiteHint(canon70d).value() == 13480u);
+
+    tri::RawDecodeHintInput canon_control = canon70d;
+    canon_control.model = "EOS 5D Mark IV";
+    assert(!tri::Canon70DReducedRawWhiteHint(canon_control).has_value());
+
+    tri::RawDecodeHintInput a1m2;
+    a1m2.make = "Sony";
+    a1m2.model = "ILCE-1M2";
+    a1m2.raw_width = 5632;
+    a1m2.raw_height = 4096;
+    const auto crop = tri::ProcessedRawCropHint(a1m2);
+    assert(crop.has_value());
+    assert(crop->width == 5628);
+    assert(crop->height == 3756);
+}
+
 void TestRawDecodeProvenanceMapping() {
     const tri::RawDecodeProvenance bayer = tri::MakeRawDecodeProvenance(
         tri::RawSensorClass::kBayerOrOtherCfa, tri::RawDecodeMode::kExport,
@@ -246,6 +287,7 @@ int main() {
     TestLargeExportSpacesRemainLinear();
     TestRawSensorClassificationBoundaries();
     TestLeicaSl2CameraMatrixOverride();
+    TestRawDecodeCameraHints();
     TestRawDecodeProvenanceMapping();
     TestArtifactIdentityIncludesRawProvenancePolicy();
 
@@ -344,6 +386,10 @@ int main() {
     const auto white = tri::SelectTrustedRawWhiteLevel(levels);
     assert(white.has_value());
     assert(*white == 16383);
+    levels.linear_max = {12000, 12000, 12000, 12000};
+    const auto rt_like_white = tri::SelectTrustedRawWhiteLevel(levels);
+    assert(rt_like_white.has_value());
+    assert(*rt_like_white == 16383);
 
     fs::remove_all(root, ec);
     return 0;

@@ -23,6 +23,7 @@ void PrintRow(const fs::path& path,
               << tri::RawDecodeTargetColorSpaceName(target) << ","
               << (result.ok ? "ok" : "blocked") << ","
               << result.reason << ","
+              << result.sensor_hints << ","
               << tri::RawSensorClassName(p.raw_class) << ","
               << tri::RawLinearRec2020PolicyName(p.policy) << ","
               << tri::RawDecodeModeName(p.decode_mode) << ","
@@ -39,7 +40,7 @@ int main(int argc, char** argv) {
         return 2;
     }
 
-    std::cout << "input,target,status,reason,raw_class,raw_policy,"
+    std::cout << "input,target,status,reason,raw_sensor_hints,raw_class,raw_policy,"
                  "raw_decode_mode,raw_fallback_status,raw_target_color_space,"
                  "raw_provenance_sig\n";
     int failures = 0;

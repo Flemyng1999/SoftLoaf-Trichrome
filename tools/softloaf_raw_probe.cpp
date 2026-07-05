@@ -33,14 +33,16 @@ void PrintProbeCsv(const fs::path& input,
                    int height,
                    const std::string& color_state,
                    const std::string& color_space,
+                   const std::string& sensor_hints,
                    const softloaf::trichrome::RawDecodeProvenance& provenance) {
     std::cout << "input,output,status,reason,width,height,color_state,color_space,"
-                 "raw_class,raw_policy,raw_decode_mode,raw_fallback_status,"
+                 "raw_sensor_hints,raw_class,raw_policy,raw_decode_mode,raw_fallback_status,"
                  "raw_target_color_space,raw_provenance_sig\n"
               << input.string() << "," << output.string() << ","
               << status << "," << reason << ","
               << width << "," << height << ","
               << color_state << "," << color_space << ","
+              << sensor_hints << ","
               << softloaf::trichrome::RawSensorClassName(provenance.raw_class) << ","
               << softloaf::trichrome::RawLinearRec2020PolicyName(provenance.policy) << ","
               << softloaf::trichrome::RawDecodeModeName(provenance.decode_mode) << ","
@@ -89,7 +91,7 @@ int main(int argc, char** argv) {
         desktop::ProbeRawProvenance(input, desktop::DecodeMode::kExport, target);
     if (provenance_only) {
         PrintProbeCsv(input, output, probe.ok ? "ok" : "blocked", probe.reason,
-                      0, 0, "", "", probe.provenance);
+                      0, 0, "", "", probe.sensor_hints, probe.provenance);
         return probe.provenance.present ? 0 : 1;
     }
 
@@ -101,7 +103,7 @@ int main(int argc, char** argv) {
     if (image.empty() || image.data.depth() != CV_32F || image.data.channels() != 3) {
         PrintProbeCsv(input, output, "decode_failed",
                       probe.reason == "ok" ? "decode_failed_after_probe" : probe.reason,
-                      0, 0, "", "", probe.provenance);
+                      0, 0, "", "", probe.sensor_hints, probe.provenance);
         return 1;
     }
 
@@ -115,12 +117,12 @@ int main(int argc, char** argv) {
         PrintProbeCsv(input, output, "write_failed", "write_failed",
                       image.width(), image.height(),
                       space == "camera-native" ? "camera_linear" : "working_linear",
-                      image.color_space, image.raw_provenance);
+                      image.color_space, probe.sensor_hints, image.raw_provenance);
         return 1;
     }
 
     PrintProbeCsv(input, output, "ok", "ok", image.width(), image.height(),
                   space == "camera-native" ? "camera_linear" : "working_linear",
-                  image.color_space, image.raw_provenance);
+                  image.color_space, probe.sensor_hints, image.raw_provenance);
     return 0;
 }
