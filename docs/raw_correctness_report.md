@@ -2,6 +2,58 @@
 
 Date: 2026-07-01
 
+## 2026-07-05 Negative RAW Compatibility Sync
+
+Detailed status: `docs/status/raw_compatibility_status_20260705.md`.
+
+Goal: align Trichrome's RAW import/decode/provenance boundary with the current
+SoftLoaf-Negative RAW closeout while keeping Trichrome's recipe and compose
+semantics unchanged.
+
+Product fixes synced:
+
+- RAW white selection now follows the RT-like policy proven in Negative:
+  plausible LibRaw `maximum` wins over `linear_max`, with fallback to
+  `linear_max` / `data_maximum` only when needed.
+- Canon EOS 70D mRAW/sRAW reduced full-color buffers get the narrow
+  `canon_70d_sraw_white_v1` saturation hint (`13480`) only for
+  `filters=0 colors=3 raw_image=0 color4_image=1`.
+- Sony packed full-color `color4_image` fallback remains camera-native only,
+  with a narrow `sony_packed_color4_black_v1` LibRaw black hint for
+  `filters=0 colors=3 color4_image=1 raw_image=0 black=1024`.
+- Sony ILCE-1M2 `5632x4096` processed-output crop is represented by the narrow
+  `sony_ilce_1m2_lossless_m_raw_crop_v1` hint at Trichrome's current LibRaw
+  processed bitmap boundary.
+- `softloaf_raw_probe` and `softloaf_raw_provenance_matrix` now print
+  `raw_sensor_hints` so sample probes show whether these narrow paths triggered.
+- RAW policy/provenance identity moved to `raw-boundary-v2` so caches/artifacts
+  do not silently reuse pre-sync RAW decode assumptions.
+
+Boundary updates:
+
+- Phase One/Leaf native IIQ remains
+  `BLOCKED_BY_VENDOR_SDK_PROFILE_CORRECTION_ORACLE`; Capture One-exported
+  16-bit ACEScg linear TIFF/DNG is the supported workaround/oracle stance.
+- Nikon HE/TicoRAW and Sony A7M5 `Compression=Next` remain upstream decoder
+  boundaries.
+- Foveon/X3F, processed/float/computational DNG, ARQ/pixel-shift, Panasonic
+  high-resolution RW2, monochrome RAW, and cinema/special RAW remain parked or
+  excluded from the ordinary RAW gate.
+
+Verification:
+
+```bash
+cmake --build build --target trichrome_smoke trichrome_desktop_core_test softloaf_raw_probe softloaf_raw_provenance_matrix
+ctest --test-dir build -R 'trichrome_smoke|trichrome_desktop_core' --output-on-failure
+build/softloaf_raw_provenance_matrix /Users/flemyng/Pictures/2025/2025-02-23/IMG_7734.CR2
+build/softloaf_raw_probe --input /Users/flemyng/Pictures/2025/2025-02-23/IMG_7734.CR2 --output /tmp/softloaf_trichrome_cr2_probe.tiff --space camera-native
+```
+
+No local Sony packed, Canon EOS 70D reduced, or Leica SL2 sample was available
+for a real-sample targeted compare in this pass; those cases are protected by
+metadata-shape unit tests and documented as needing fixture-backed RT compare if
+the next step changes deeper decode behavior.
+
 ## 2026-07-04 Targeted RAW Compatibility Sync
 
 Goal: sync the confirmed SoftLoaf-Negative product RAW decode/admission fixes
