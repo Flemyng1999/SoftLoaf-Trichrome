@@ -18,6 +18,9 @@ Negative references read for this pass:
 
 Product RAW entry points:
 
+- `include/softloaf_trichrome/model.hpp`: single source of truth for RAW-like
+  and still-image import extensions, including boundary-visible `.x3f` while
+  keeping parked native Phase One `.iiq` out of ordinary import.
 - `src/desktop_decoder.cpp`: RAW extension dispatch, LibRaw open/unpack,
   processed bitmap decode, guarded Rec.2020 probe path, provenance probe.
 - `src/desktop_decoder.hpp`: desktop decode/provenance API.
@@ -115,6 +118,8 @@ Parked or excluded from ordinary RAW bugs:
 - Nikon HE/TicoRAW and Sony A7M5 `Compression=Next`:
   `NEEDS_RT_OR_LIBRAW_UPSTREAM`.
 - Foveon/X3F: non-Bayer sensor boundary, excluded from the ordinary gate.
+  `.x3f` is still included in the import/probe extension boundary so it fails
+  closed observably instead of disappearing as `not_raw_extension`.
 - Processed/float/computational DNG, ARQ/pixel-shift, Panasonic high-resolution
   RW2, monochrome RAW, and cinema/special RAW: parked feature boundaries unless
   a scoped product intake defines provenance, range, profile, and oracle policy.

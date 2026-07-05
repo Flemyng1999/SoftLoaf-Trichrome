@@ -388,11 +388,11 @@ Before these fixes, the camera-native comparison averaged `low_mean_abs=0.243619
 | Hasselblad 3FR/FFF | 3FR smoke decoded and compared | FFF still needs sample validation. |
 | Olympus ORF | Smoke decoded and compared | Real difference remains. |
 | Panasonic RW2 | Smoke decoded and compared | Real difference remains. |
-| Sigma/Foveon X3F | Not in import extension list; no X3F sample in this smoke | Do not merge with Bayer/X-Trans conclusions. If LibRaw processed RGB succeeds, treat as fallback smoke, not full correctness. |
+| Sigma/Foveon X3F | Boundary-visible in the import/probe extension list; fixture regression records `raw_open_failed` for `Sigma/DP1 Merrill/SDIM0555.X3F` | Do not merge with Bayer/X-Trans conclusions. X3F remains excluded from ordinary RAW support even though the suffix is recognized for observable fail-closed handling. |
 
 ## Final Buckets
 
 - Fixed: RT32 tooling, project RAW dump tooling, diff CSV tooling, path-safe input lists, and white-level guard for bad `linear_max <= black`.
 - Oracle error/false positive: 16-bit RT TIFF clipping is explicitly excluded; no 16-bit oracle results used.
-- Current format not supported: X3F is not currently importable by extension and needs a separate Foveon path.
+- Current format boundary: X3F is recognized by extension for observable fail-closed handling, but remains excluded from ordinary RAW correctness and needs a separate Foveon path for real support.
 - Still real differences: all 10 smoke samples show material differences after low-pass comparison, even after simple per-channel gain correction. The dominant known remaining cause is LibRaw's 16-bit processed intermediate and non-RT development pipeline, not the already-fixed active-area or output-space mismatch.

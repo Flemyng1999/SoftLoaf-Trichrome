@@ -248,21 +248,57 @@ inline std::string LowerExtension(std::filesystem::path path) {
     return ext;
 }
 
-inline bool IsRawLikeExtension(const std::string& ext) {
+inline const std::vector<std::string>& RawLikeExtensions() {
     static const std::vector<std::string> kRawExts = {
         ".3fr", ".fff", ".dng", ".arw", ".cr2", ".cr3", ".nef", ".raf",
         ".raw", ".rw2", ".orf", ".pef", ".srw", ".x3f", ".tif", ".tiff"};
-    return std::find(kRawExts.begin(), kRawExts.end(), ext) != kRawExts.end();
+    return kRawExts;
+}
+
+inline const std::vector<std::string>& RegularImageExtensions() {
+    static const std::vector<std::string> kImageExts = {".jpg", ".jpeg", ".png"};
+    return kImageExts;
+}
+
+inline std::vector<std::string> SupportedStillImageExtensions() {
+    std::vector<std::string> exts = RawLikeExtensions();
+    const std::vector<std::string>& images = RegularImageExtensions();
+    exts.insert(exts.end(), images.begin(), images.end());
+    return exts;
+}
+
+inline bool IsRawLikeExtension(const std::string& ext) {
+    const std::vector<std::string>& raw_exts = RawLikeExtensions();
+    return std::find(raw_exts.begin(), raw_exts.end(), ext) != raw_exts.end();
 }
 
 inline bool IsSupportedStillImageExtension(const std::string& ext) {
-    static const std::vector<std::string> kImageExts = {".jpg", ".jpeg", ".png"};
+    const std::vector<std::string>& image_exts = RegularImageExtensions();
     return IsRawLikeExtension(ext) ||
-           std::find(kImageExts.begin(), kImageExts.end(), ext) != kImageExts.end();
+           std::find(image_exts.begin(), image_exts.end(), ext) != image_exts.end();
+}
+
+inline std::string SupportedImagesFileFilter() {
+    std::string filter = "Supported images (";
+    bool first = true;
+    for (const std::string& ext : SupportedStillImageExtensions()) {
+        if (!first) filter += ' ';
+        first = false;
+        filter += '*';
+        filter += ext;
+    }
+    filter += ");;All files (*)";
+    return filter;
+}
+
+inline bool IsAppleDoubleSidecarPath(const std::filesystem::path& path) {
+    const std::string name = PathUtf8String(path.filename());
+    return name.rfind("._", 0) == 0;
 }
 
 inline bool IsImportableRawPath(const std::filesystem::path& path) {
-    return IsSupportedStillImageExtension(LowerExtension(path));
+    return !IsAppleDoubleSidecarPath(path) &&
+           IsSupportedStillImageExtension(LowerExtension(path));
 }
 
 inline InputRecipe MakeTrichromeInputRecipe(std::string name,

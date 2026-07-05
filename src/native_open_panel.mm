@@ -3,6 +3,8 @@
 #import <AppKit/AppKit.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
+#include "softloaf_trichrome/model.hpp"
+
 namespace softloaf::trichrome::desktop {
 
 std::vector<std::filesystem::path> NativeOpenFilesOrFolders(const char* title) {
@@ -18,10 +20,12 @@ std::vector<std::filesystem::path> NativeOpenFilesOrFolders(const char* title) {
 
         if (@available(macOS 11.0, *)) {
             NSMutableArray<UTType*>* types = [NSMutableArray array];
-            for (NSString* ext in @[ @"3fr", @"fff", @"dng", @"arw", @"cr2", @"cr3",
-                                     @"nef", @"raf", @"raw", @"rw2", @"orf", @"pef",
-                                     @"srw", @"tif", @"tiff", @"jpg", @"jpeg", @"png" ]) {
-                UTType* type = [UTType typeWithFilenameExtension:ext];
+            for (const std::string& ext : SupportedStillImageExtensions()) {
+                const std::string bare_ext = ext.size() > 0 && ext[0] == '.'
+                    ? ext.substr(1)
+                    : ext;
+                NSString* ns_ext = [NSString stringWithUTF8String:bare_ext.c_str()];
+                UTType* type = [UTType typeWithFilenameExtension:ns_ext];
                 if (type) [types addObject:type];
             }
             if (types.count > 0) panel.allowedContentTypes = types;

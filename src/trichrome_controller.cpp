@@ -1223,7 +1223,7 @@ std::vector<std::filesystem::path> TrichromeController::pathsForGroup(int group_
 }
 
 QString TrichromeController::fileFilter() const {
-    return "Supported images (*.3fr *.fff *.dng *.arw *.cr2 *.cr3 *.nef *.raf *.raw *.rw2 *.orf *.pef *.srw *.tif *.tiff *.jpg *.jpeg *.png);;All files (*)";
+    return QString::fromStdString(SupportedImagesFileFilter());
 }
 
 QString TrichromeController::publishPreview(const QImage& image) {

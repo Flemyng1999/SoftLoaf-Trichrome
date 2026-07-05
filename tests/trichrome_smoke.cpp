@@ -280,6 +280,51 @@ void TestArtifactIdentityIncludesRawProvenancePolicy() {
     assert(tri::ComputeArtifactSignature(group, tri::ArtifactTier::kFull, white) != sig);
 }
 
+void TestImportSkipsAppleDoubleRawSidecars() {
+    const fs::path root = fs::temp_directory_path() / "softloaf_phase_one_sidecars";
+    std::error_code ec;
+    fs::remove_all(root, ec);
+    fs::create_directories(root, ec);
+
+    Touch(root / "._Pro-Capture One 14170.dng", "appledouble red");
+    Touch(root / "._Pro-Capture One 14171.dng", "appledouble green");
+    Touch(root / "._Pro-Capture One 14172.dng", "appledouble blue");
+    Touch(root / "Pro-Capture One 14170.dng", "red dng");
+    Touch(root / "Pro-Capture One 14171.dng", "green dng");
+    Touch(root / "Pro-Capture One 14172.dng", "blue dng");
+    Touch(root / "Pro-Capture One 14170.iiq", "native iiq red");
+    Touch(root / "Pro-Capture One 14171.iiq", "native iiq green");
+    Touch(root / "Pro-Capture One 14172.iiq", "native iiq blue");
+    Touch(root / "SDIM0555.X3F", "foveon boundary");
+
+    assert(!tri::IsImportableRawPath(root / "._Pro-Capture One 14170.dng"));
+    assert(tri::IsImportableRawPath(root / "Pro-Capture One 14170.dng"));
+    assert(!tri::IsImportableRawPath(root / "Pro-Capture One 14170.iiq"));
+    assert(tri::IsImportableRawPath(root / "SDIM0555.X3F"));
+    assert(tri::DetectDominantRawSuffix(root) == ".dng");
+    assert(tri::SupportedImagesFileFilter().find("*.x3f") != std::string::npos);
+    assert(tri::SupportedImagesFileFilter().find("*.iiq") == std::string::npos);
+
+    tri::TrichromeImportRequest request;
+    request.folder = root;
+    request.sensor_type = tri::InputSensorType::kBayer;
+    const tri::TrichromeImportPlan plan =
+        tri::TrichromeImportService().FromRequest(request);
+    assert(plan.ok());
+    assert(plan.report.file_count == 3);
+    assert(plan.report.valid_group_count == 1);
+    assert(plan.report.groups.size() == 1);
+    assert(plan.report.groups[0].sources.size() == 3);
+    assert(plan.report.groups[0].sources[0].path.filename() ==
+           fs::path("Pro-Capture One 14170.dng"));
+    assert(plan.report.groups[0].sources[1].path.filename() ==
+           fs::path("Pro-Capture One 14171.dng"));
+    assert(plan.report.groups[0].sources[2].path.filename() ==
+           fs::path("Pro-Capture One 14172.dng"));
+
+    fs::remove_all(root, ec);
+}
+
 }  // namespace
 
 int main() {
@@ -290,6 +335,7 @@ int main() {
     TestRawDecodeCameraHints();
     TestRawDecodeProvenanceMapping();
     TestArtifactIdentityIncludesRawProvenancePolicy();
+    TestImportSkipsAppleDoubleRawSidecars();
 
     const fs::path root = fs::temp_directory_path() / "softloaf_trichrome_smoke";
     std::error_code ec;

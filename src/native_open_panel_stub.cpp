@@ -7,6 +7,7 @@
 #include <QPushButton>
 #include <QStringList>
 
+#include "softloaf_trichrome/model.hpp"
 #include "qt_path_utils.hpp"
 
 namespace softloaf::trichrome::desktop {
@@ -28,7 +29,7 @@ std::vector<std::filesystem::path> NativeOpenFilesOrFolders(const char* title) {
             nullptr,
             title ? QString::fromUtf8(title) : QStringLiteral("Choose trichrome photos"),
             QString(),
-            QStringLiteral("Supported images (*.3fr *.fff *.dng *.arw *.cr2 *.cr3 *.nef *.raf *.raw *.rw2 *.orf *.pef *.srw *.tif *.tiff *.jpg *.jpeg *.png);;All files (*)"));
+            QString::fromStdString(SupportedImagesFileFilter()));
         out.reserve(file_paths.size());
         for (const QString& path : file_paths) out.push_back(PathFromQString(path));
     } else if (box.clickedButton() == folder_button) {
