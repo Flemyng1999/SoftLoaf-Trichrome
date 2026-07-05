@@ -1,0 +1,8 @@
+label	relative_path	target	expect_ok	expect_reason	expect_class	expect_policy	expect_hints_contains	expect_matrix_source	decode_target	expect_decode_width	expect_decode_height	notes
+sony_a1m2_lossless_m	SONY 2/ILCE-1M2/A1_07628_lossless_compressed_medium_full_frame.ARW	camera-native	ok	ok	packed_four_color	fallback_only	sony_packed_color4_black_v1;sony_ilce_1m2_lossless_m_raw_crop_v1	libraw_cam_xyz	camera-native	5628	3756	Sony packed color4 fallback plus A1M2 crop.
+canon_70d_mraw	Canon/EOS 70D/mRAW_CANON_EOS70D_01.CR2	camera-native	ok	ok	packed_four_color	fallback_only	canon_70d_sraw_white_v1	libraw_cam_xyz	camera-native	4104	2736	Canon 70D mRAW narrow white hint.
+canon_70d_sraw	Canon/EOS 70D/sRAW_CANON_EOS70D_01.CR2	camera-native	ok	ok	packed_four_color	fallback_only	canon_70d_sraw_white_v1	libraw_cam_xyz	camera-native	2736	1824	Canon 70D sRAW narrow white hint.
+canon_5d4_mraw_control	Canon/EOS 5D Mark IV/B13A0732.CR2	camera-native	ok	ok	packed_four_color	fallback_only	none	libraw_cam_xyz	camera-native	3360	2240	Reduced Canon control must not receive 70D white hint.
+leica_sl2_dng	LEICA CAMERA AG 2/LEICA SL2/L1020010.DNG	rec2020	ok	ok	bayer_or_other_cfa	supported	none	builtin_leica_sl2_dcraw_matrix_v1	rec2020	8384	5605	Leica SL2 must use built-in dcraw matrix source.
+nikon_z8_he_boundary	Nikon/Z 8/Nikon_Z8_raw_high_efficiency_hight.NEF	rec2020	blocked	raw_unpack_failed	none	none	none	libraw_cam_xyz	none	0	0	Nikon HE/TicoRAW remains upstream decoder boundary.
+sigma_x3f_foveon_boundary	Sigma/DP1 Merrill/SDIM0555.X3F	rec2020	blocked	raw_open_failed	none	none	none	unknown	none	0	0	Foveon/X3F sample fails closed at LibRaw open and must not enter ordinary RAW support.

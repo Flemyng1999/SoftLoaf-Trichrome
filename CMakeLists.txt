@@ -195,5 +195,18 @@ if(SOFTLOAF_TRICHROME_BUILD_TESTS)
             Qt6::Core
             Qt6::Gui)
         add_test(NAME trichrome_desktop_core COMMAND trichrome_desktop_core_test)
+
+        add_executable(raw_fixture_regression_test
+            tests/raw_fixture_regression_test.cpp
+            src/desktop_decoder.cpp)
+        target_include_directories(raw_fixture_regression_test PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/src)
+        target_compile_definitions(raw_fixture_regression_test PRIVATE
+            SOFTLOAF_TRICHROME_RAW_FIXTURE_MANIFEST="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/raw_compat_manifest.tsv")
+        target_link_libraries(raw_fixture_regression_test PRIVATE
+            softloaf_trichrome
+            ${SOFTLOAF_LIBRAW_TARGET}
+            Qt6::Core)
+        add_test(NAME raw_fixture_regression COMMAND raw_fixture_regression_test)
     endif()
 endif()
