@@ -25,7 +25,13 @@ Product fixes synced:
   `sony_ilce_1m2_lossless_m_raw_crop_v1` hint at Trichrome's current LibRaw
   processed bitmap boundary.
 - `softloaf_raw_probe` and `softloaf_raw_provenance_matrix` now print
-  `raw_sensor_hints` so sample probes show whether these narrow paths triggered.
+  `raw_sensor_hints`, RAW buffer-shape metadata, levels, dimensions, and
+  `raw_matrix_source` so sample probes show whether these narrow paths
+  triggered.
+- Added fixture-gated regression coverage in
+  `tests/fixtures/raw_compat_manifest.tsv` and
+  `tests/raw_fixture_regression_test.cpp`. The test skips only when the RAW
+  fixture root is absent; with the T7 corpus mounted it validates real files.
 - RAW policy/provenance identity moved to `raw-boundary-v2` so caches/artifacts
   do not silently reuse pre-sync RAW decode assumptions.
 
@@ -47,12 +53,32 @@ cmake --build build --target trichrome_smoke trichrome_desktop_core_test softloa
 ctest --test-dir build -R 'trichrome_smoke|trichrome_desktop_core' --output-on-failure
 build/softloaf_raw_provenance_matrix /Users/flemyng/Pictures/2025/2025-02-23/IMG_7734.CR2
 build/softloaf_raw_probe --input /Users/flemyng/Pictures/2025/2025-02-23/IMG_7734.CR2 --output /tmp/softloaf_trichrome_cr2_probe.tiff --space camera-native
+cmake --build build --target raw_fixture_regression_test
+build/raw_fixture_regression_test
 ```
 
-No local Sony packed, Canon EOS 70D reduced, or Leica SL2 sample was available
-for a real-sample targeted compare in this pass; those cases are protected by
-metadata-shape unit tests and documented as needing fixture-backed RT compare if
-the next step changes deeper decode behavior.
+Fixture-backed facts from
+`/Volumes/T7 Touch/Film/RAW/raw_pixls_us_camera_only_rsync`:
+
+- Sony A1M2 lossless M:
+  `packed_four_color`, `fallback_only`, Rec.2020 blocked, camera-native decode
+  ok at `5628x3756`; hints
+  `sony_packed_color4_black_v1;sony_ilce_1m2_lossless_m_raw_crop_v1`.
+- Canon EOS 70D mRAW/sRAW: both `packed_four_color`, `fallback_only`,
+  camera-native decode ok; both trigger `canon_70d_sraw_white_v1`.
+- Canon 5D Mark IV mRAW control: `packed_four_color`, `fallback_only`,
+  camera-native decode ok at `3360x2240`; no 70D hint.
+- Leica SL2 DNG: `bayer_or_other_cfa`, Rec.2020 supported, Rec.2020 decode ok
+  at `8384x5605`; matrix source is
+  `builtin_leica_sl2_dcraw_matrix_v1`.
+- Nikon Z8 HE: `raw_unpack_failed`; treated as upstream decoder boundary.
+- Sigma DP1 Merrill X3F: `raw_open_failed`; treated as excluded special RAW
+  boundary, not ordinary RAW support.
+
+Confirmed fact: these are Trichrome product/probe-path fixture regressions.
+Inference: they do not establish full RawTherapee pixel parity for Trichrome's
+LibRaw processed bitmap path; deeper parity still belongs behind a dedicated
+oracle compare.
 
 ## 2026-07-04 Targeted RAW Compatibility Sync
 
