@@ -4,5 +4,6 @@ canon_70d_mraw	Canon/EOS 70D/mRAW_CANON_EOS70D_01.CR2	camera-native	ok	ok	packed
 canon_70d_sraw	Canon/EOS 70D/sRAW_CANON_EOS70D_01.CR2	camera-native	ok	ok	packed_four_color	fallback_only	canon_70d_sraw_white_v1	libraw_cam_xyz	camera-native	2736	1824	Canon 70D sRAW narrow white hint.
 canon_5d4_mraw_control	Canon/EOS 5D Mark IV/B13A0732.CR2	camera-native	ok	ok	packed_four_color	fallback_only	none	libraw_cam_xyz	camera-native	3360	2240	Reduced Canon control must not receive 70D white hint.
 leica_sl2_dng	LEICA CAMERA AG 2/LEICA SL2/L1020010.DNG	rec2020	ok	ok	bayer_or_other_cfa	supported	none	builtin_leica_sl2_dcraw_matrix_v1	rec2020	8384	5605	Leica SL2 must use built-in dcraw matrix source.
+phase_one_iq150_iiq	Phase One/IQ150/CF006803.IIQ	rec2020	ok	ok	bayer_or_other_cfa	supported	none	libraw_cam_xyz	rec2020	8272	6200	Phase One native IIQ is import/decode supported through LibRaw; this is not a Capture One vendor-correction parity claim.
 nikon_z8_he_boundary	Nikon/Z 8/Nikon_Z8_raw_high_efficiency_hight.NEF	rec2020	blocked	raw_unpack_failed	none	none	none	libraw_cam_xyz	none	0	0	Nikon HE/TicoRAW remains upstream decoder boundary.
 sigma_x3f_foveon_boundary	Sigma/DP1 Merrill/SDIM0555.X3F	rec2020	blocked	raw_open_failed	none	none	none	unknown	none	0	0	Foveon/X3F sample fails closed at LibRaw open and must not enter ordinary RAW support.

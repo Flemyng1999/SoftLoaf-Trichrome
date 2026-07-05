@@ -251,7 +251,8 @@ inline std::string LowerExtension(std::filesystem::path path) {
 inline const std::vector<std::string>& RawLikeExtensions() {
     static const std::vector<std::string> kRawExts = {
         ".3fr", ".fff", ".dng", ".arw", ".cr2", ".cr3", ".nef", ".raf",
-        ".raw", ".rw2", ".orf", ".pef", ".srw", ".x3f", ".tif", ".tiff"};
+        ".raw", ".rw2", ".orf", ".pef", ".srw", ".iiq", ".x3f", ".tif",
+        ".tiff"};
     return kRawExts;
 }
 

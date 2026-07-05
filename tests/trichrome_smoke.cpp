@@ -289,6 +289,7 @@ void TestImportSkipsAppleDoubleRawSidecars() {
     Touch(root / "._Pro-Capture One 14170.dng", "appledouble red");
     Touch(root / "._Pro-Capture One 14171.dng", "appledouble green");
     Touch(root / "._Pro-Capture One 14172.dng", "appledouble blue");
+    Touch(root / "._Pro-Capture One 14170.iiq", "appledouble native iiq");
     Touch(root / "Pro-Capture One 14170.dng", "red dng");
     Touch(root / "Pro-Capture One 14171.dng", "green dng");
     Touch(root / "Pro-Capture One 14172.dng", "blue dng");
@@ -298,12 +299,13 @@ void TestImportSkipsAppleDoubleRawSidecars() {
     Touch(root / "SDIM0555.X3F", "foveon boundary");
 
     assert(!tri::IsImportableRawPath(root / "._Pro-Capture One 14170.dng"));
+    assert(!tri::IsImportableRawPath(root / "._Pro-Capture One 14170.iiq"));
     assert(tri::IsImportableRawPath(root / "Pro-Capture One 14170.dng"));
-    assert(!tri::IsImportableRawPath(root / "Pro-Capture One 14170.iiq"));
+    assert(tri::IsImportableRawPath(root / "Pro-Capture One 14170.iiq"));
     assert(tri::IsImportableRawPath(root / "SDIM0555.X3F"));
     assert(tri::DetectDominantRawSuffix(root) == ".dng");
     assert(tri::SupportedImagesFileFilter().find("*.x3f") != std::string::npos);
-    assert(tri::SupportedImagesFileFilter().find("*.iiq") == std::string::npos);
+    assert(tri::SupportedImagesFileFilter().find("*.iiq") != std::string::npos);
 
     tri::TrichromeImportRequest request;
     request.folder = root;

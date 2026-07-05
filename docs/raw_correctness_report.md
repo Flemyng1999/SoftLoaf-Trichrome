@@ -37,9 +37,10 @@ Product fixes synced:
 
 Boundary updates:
 
-- Phase One/Leaf native IIQ remains
-  `BLOCKED_BY_VENDOR_SDK_PROFILE_CORRECTION_ORACLE`; Capture One-exported
-  16-bit ACEScg linear TIFF/DNG is the supported workaround/oracle stance.
+- Phase One/Leaf native IIQ import/decode is supported through the LibRaw
+  Bayer/CFA path; Capture One vendor correction/profile parity remains
+  `BLOCKED_BY_VENDOR_SDK_PROFILE_CORRECTION_ORACLE`. Capture One-exported
+  16-bit ACEScg linear TIFF/DNG is the high-confidence workaround/oracle stance.
 - Nikon HE/TicoRAW and Sony A7M5 `Compression=Next` remain upstream decoder
   boundaries.
 - Foveon/X3F, processed/float/computational DNG, ARQ/pixel-shift, Panasonic
@@ -103,8 +104,7 @@ Not changed:
 
 - No full RAW sweep was rerun or copied into this report.
 - No EXCLUDE/PARK strategy was changed for Nikon HE/TicoRAW, X3F/Foveon,
-  ARQ/Pixel Shift, CinemaDNG, float/processed DNG, Canon mRAW/sRAW, or
-  Phase/Leaf IIQ.
+  ARQ/Pixel Shift, CinemaDNG, float/processed DNG, or Canon mRAW/sRAW.
 - SoftLoaf-Negative `onda_rt_tap_compare --align-orientation` was not migrated:
   Trichrome does not have the same staged RT tap compare tool, and that change
   is diagnostic geometry alignment rather than a product RAW decode fix.

@@ -19,8 +19,8 @@ Negative references read for this pass:
 Product RAW entry points:
 
 - `include/softloaf_trichrome/model.hpp`: single source of truth for RAW-like
-  and still-image import extensions, including boundary-visible `.x3f` while
-  keeping parked native Phase One `.iiq` out of ordinary import.
+  and still-image import extensions, including Phase One/Leaf `.iiq` plus
+  boundary-visible `.x3f`.
 - `src/desktop_decoder.cpp`: RAW extension dispatch, LibRaw open/unpack,
   processed bitmap decode, guarded Rec.2020 probe path, provenance probe.
 - `src/desktop_decoder.hpp`: desktop decode/provenance API.
@@ -92,9 +92,12 @@ Not synced:
 - Negative's sensor-native Bayer/X-Trans demosaic, camconst JSON ingestion,
   masked-area black, aperture-scaled white, C1 affine/oracle compare, and
   broader RAW sweep tooling are not part of Trichrome's current input boundary.
-- Phase One/Leaf native IIQ C1 parity is not implemented. The product stance is
+- Phase One/Leaf native IIQ Capture One parity is not implemented. Native
+  `.iiq` import/decode is supported through the current LibRaw Bayer/CFA path,
+  but C1 vendor correction/profile parity remains
   `BLOCKED_BY_VENDOR_SDK_PROFILE_CORRECTION_ORACLE`; use Capture One-exported
-  16-bit ACEScg linear TIFF/DNG as the documented workaround/oracle.
+  16-bit ACEScg linear TIFF/DNG as the documented high-confidence oracle or
+  workaround.
 
 ## Product boundary
 
@@ -103,6 +106,9 @@ Supported normal gate:
 - Ordinary still-camera Bayer/other CFA RAWs that LibRaw can open/unpack.
 - Guarded linear Rec.2020 output remains enabled only for
   `bayer_or_other_cfa`.
+- Phase One/Leaf native `.iiq` enters this normal LibRaw Bayer/CFA gate when
+  LibRaw opens/unpacks it. This is a decode/import support claim, not C1
+  vendor-correction parity.
 
 Fallback-only:
 
@@ -113,8 +119,6 @@ Fallback-only:
 
 Parked or excluded from ordinary RAW bugs:
 
-- Phase One/Leaf native IIQ: parked/blocked by vendor SDK or C1
-  profile-correction oracle; C1 ACEScg TIFF/DNG is the workaround.
 - Nikon HE/TicoRAW and Sony A7M5 `Compression=Next`:
   `NEEDS_RT_OR_LIBRAW_UPSTREAM`.
 - Foveon/X3F: non-Bayer sensor boundary, excluded from the ordinary gate.
@@ -147,7 +151,7 @@ Result with `/Volumes/T7 Touch/Film/RAW/raw_pixls_us_camera_only_rsync`
 mounted:
 
 ```text
-PASS raw_fixture_regression rows=7 root="/Volumes/T7 Touch/Film/RAW/raw_pixls_us_camera_only_rsync"
+PASS raw_fixture_regression rows=8 root="/Volumes/T7 Touch/Film/RAW/raw_pixls_us_camera_only_rsync"
 ```
 
 Confirmed fixture facts:
@@ -159,6 +163,7 @@ Confirmed fixture facts:
 | `Canon/EOS 70D/sRAW_CANON_EOS70D_01.CR2` | `packed_four_color`, `fallback_only`; camera-native decode ok | `raw_sensor_hints=canon_70d_sraw_white_v1`; output `2736x1824`. |
 | `Canon/EOS 5D Mark IV/B13A0732.CR2` | reduced Canon control remains fallback-only without 70D hint | `raw_sensor_hints=none`; output `3360x2240`. |
 | `LEICA CAMERA AG 2/LEICA SL2/L1020010.DNG` | `bayer_or_other_cfa`, Rec.2020 supported | `raw_matrix_source=builtin_leica_sl2_dcraw_matrix_v1`; Rec.2020 output `8384x5605`. |
+| `Phase One/IQ150/CF006803.IIQ` | `bayer_or_other_cfa`, Rec.2020 supported | Native IIQ import/decode ok through LibRaw; Rec.2020 output `8272x6200`; not a Capture One vendor-correction parity claim. |
 | `Nikon/Z 8/Nikon_Z8_raw_high_efficiency_hight.NEF` | upstream decoder boundary | `raw_unpack_failed`; make/model visible as `Nikon/Z 8`; no provenance claim. |
 | `Sigma/DP1 Merrill/SDIM0555.X3F` | excluded special RAW boundary | `raw_open_failed`; no provenance claim; not treated as ordinary RAW support. |
 
@@ -170,6 +175,7 @@ build/softloaf_raw_provenance_matrix \
   '/Volumes/T7 Touch/Film/RAW/raw_pixls_us_camera_only_rsync/Canon/EOS 70D/mRAW_CANON_EOS70D_01.CR2' \
   '/Volumes/T7 Touch/Film/RAW/raw_pixls_us_camera_only_rsync/Canon/EOS 5D Mark IV/B13A0732.CR2' \
   '/Volumes/T7 Touch/Film/RAW/raw_pixls_us_camera_only_rsync/LEICA CAMERA AG 2/LEICA SL2/L1020010.DNG' \
+  '/Volumes/T7 Touch/Film/RAW/raw_pixls_us_camera_only_rsync/Phase One/IQ150/CF006803.IIQ' \
   '/Volumes/T7 Touch/Film/RAW/raw_pixls_us_camera_only_rsync/Nikon/Z 8/Nikon_Z8_raw_high_efficiency_hight.NEF' \
   '/Volumes/T7 Touch/Film/RAW/raw_pixls_us_camera_only_rsync/Sigma/DP1 Merrill/SDIM0555.X3F'
 ```
@@ -190,7 +196,9 @@ Inference:
 - Processed/float DNG and Sigma sd Quattro linear DNG identification is still
   metadata-dependent; do not treat every LibRaw-openable DNG as a correctness
   claim without provenance review.
-- Phase One native IIQ, Nikon HE/TicoRAW, Sony A7M5 Next compression, Foveon,
+- Phase One native IIQ decode/import is supported through LibRaw, but C1
+  vendor-correction/profile parity remains outside the ordinary RAW gate.
+- Nikon HE/TicoRAW, Sony A7M5 Next compression, Foveon,
   pixel-shift/high-resolution RAW, mono, and cinema RAW remain explicitly
   outside the ordinary RAW gate.
 
