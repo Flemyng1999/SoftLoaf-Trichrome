@@ -22,6 +22,9 @@ inline bool IsPlausibleWhiteLevel(unsigned white,
 inline std::optional<unsigned> SelectTrustedRawWhiteLevel(
     const RawWhiteLevelInputs& input,
     unsigned margin = 64) {
+    if (IsPlausibleWhiteLevel(input.maximum, input.black, margin))
+        return input.maximum;
+
     unsigned linear = 0;
     for (unsigned candidate : input.linear_max) {
         if (!IsPlausibleWhiteLevel(candidate, input.black, margin)) continue;
@@ -29,8 +32,6 @@ inline std::optional<unsigned> SelectTrustedRawWhiteLevel(
     }
     if (linear != 0) return linear;
 
-    if (IsPlausibleWhiteLevel(input.maximum, input.black, margin))
-        return input.maximum;
     if (IsPlausibleWhiteLevel(input.data_maximum, input.black, margin))
         return input.data_maximum;
     return std::nullopt;

@@ -27,6 +27,7 @@
 #include "softloaf_trichrome/model.hpp"
 #include "softloaf_trichrome/raw_camera_matrix.hpp"
 #include "softloaf_trichrome/raw_classification.hpp"
+#include "softloaf_trichrome/raw_decode_hints.hpp"
 #include "softloaf_trichrome/raw_levels.hpp"
 #include "qt_path_utils.hpp"
 
@@ -83,6 +84,25 @@ RawDecodeMode RawDecodeModeFor(DecodeMode decode_mode) {
         : RawDecodeMode::kExport;
 }
 
+RawDecodeHintInput RawDecodeHintsFromLibRaw(const LibRaw& raw) {
+    RawDecodeHintInput input;
+    input.make = raw.imgdata.idata.make;
+    input.model = raw.imgdata.idata.model;
+    input.filters = raw.imgdata.idata.filters;
+    input.colors = raw.imgdata.idata.colors;
+    input.has_raw_image = raw.imgdata.rawdata.raw_image != nullptr;
+    input.has_color3_image = raw.imgdata.rawdata.color3_image != nullptr;
+    input.has_color4_image = raw.imgdata.rawdata.color4_image != nullptr;
+    input.has_float3_image = raw.imgdata.rawdata.float3_image != nullptr;
+    input.has_float4_image = raw.imgdata.rawdata.float4_image != nullptr;
+    input.black = raw.imgdata.color.black;
+    for (size_t i = 0; i < input.cblack.size(); ++i)
+        input.cblack[i] = raw.imgdata.color.cblack[i];
+    input.raw_width = raw.imgdata.sizes.raw_width;
+    input.raw_height = raw.imgdata.sizes.raw_height;
+    return input;
+}
+
 void ConfigureRawDecodeParams(LibRaw* raw, DecodeMode decode_mode) {
     raw->imgdata.params.output_color = 0;
     raw->imgdata.params.output_bps = 16;
@@ -100,8 +120,20 @@ void ConfigureRawDecodeParams(LibRaw* raw, DecodeMode decode_mode) {
           color.linear_max[2], color.linear_max[3]},
          color.maximum,
          color.data_maximum});
-    if (selected_white)
+    const RawDecodeHintInput hints = RawDecodeHintsFromLibRaw(*raw);
+    const std::optional<unsigned> hinted_white =
+        Canon70DReducedRawWhiteHint(hints);
+    if (hinted_white) {
+        raw->imgdata.params.user_sat = static_cast<int>(*hinted_white);
+    } else if (selected_white) {
         raw->imgdata.params.user_sat = static_cast<int>(*selected_white);
+    }
+
+    if (const std::optional<unsigned> hinted_black =
+            SonyPackedFullColorBlackHint(hints)) {
+        raw->imgdata.params.user_black = static_cast<int>(*hinted_black);
+        for (int& v : raw->imgdata.params.user_cblack) v = 0;
+    }
 
     if (decode_mode == DecodeMode::kPreview) {
         raw->imgdata.params.half_size = 1;
@@ -164,6 +196,20 @@ void ConvertXyzMatToLinearRec2020(cv::Mat* image) {
 void CropRawTherapeeActiveArea(cv::Mat* image) {
     if (!image || image->cols <= 8 || image->rows <= 8) return;
     *image = (*image)(cv::Rect(4, 4, image->cols - 8, image->rows - 8)).clone();
+}
+
+void ApplyProcessedRawCropHint(const RawDecodeHintInput& hints, cv::Mat* image) {
+    if (!image || image->empty()) return;
+    const std::optional<RawCropHint> crop = ProcessedRawCropHint(hints);
+    if (!crop) return;
+    if (crop->left < 0 || crop->top < 0 ||
+        crop->width <= 0 || crop->height <= 0 ||
+        crop->left + crop->width > image->cols ||
+        crop->top + crop->height > image->rows) {
+        return;
+    }
+    *image = (*image)(cv::Rect(crop->left, crop->top,
+                               crop->width, crop->height)).clone();
 }
 
 void LimitOpenMpForPreviewDecode(DecodeMode decode_mode) {
@@ -241,6 +287,7 @@ ImageBuf DecodeRawImage(const std::filesystem::path& path,
     if (raw->open_file(raw_path.c_str()) != LIBRAW_SUCCESS) return out;
 #endif
     if (raw->unpack() != LIBRAW_SUCCESS) return out;
+    const RawDecodeHintInput decode_hints = RawDecodeHintsFromLibRaw(*raw);
     const RawSensorClass raw_class =
         ClassifyRawSensor(RawClassificationFromLibRaw(*raw));
     const RawLinearRec2020Policy rec2020_policy =
@@ -280,6 +327,7 @@ ImageBuf DecodeRawImage(const std::filesystem::path& path,
                 cv::merge(std::vector<cv::Mat>{channels[0], channels[1], channels[2]}, out.data);
             }
         }
+        ApplyProcessedRawCropHint(decode_hints, &out.data);
         out.state = ColorState::kCameraLinear;
         out.raw_provenance = MakeRawDecodeProvenance(
             raw_class, RawDecodeModeFor(decode_mode),
@@ -305,6 +353,7 @@ ImageBuf DecodeRawRec2020Image(const std::filesystem::path& path,
     if (raw->open_file(raw_path.c_str()) != LIBRAW_SUCCESS) return out;
 #endif
     if (raw->unpack() != LIBRAW_SUCCESS) return out;
+    const RawDecodeHintInput decode_hints = RawDecodeHintsFromLibRaw(*raw);
     const RawSensorClass raw_class =
         ClassifyRawSensor(RawClassificationFromLibRaw(*raw));
     if (!RawDecodePolicyAllowsTarget(LinearRec2020PolicyFor(raw_class),
@@ -330,6 +379,7 @@ ImageBuf DecodeRawRec2020Image(const std::filesystem::path& path,
         cv::merge(std::vector<cv::Mat>{channels[0], channels[1], channels[2]}, out.data);
         ConvertXyzMatToLinearRec2020(&out.data);
         CropRawTherapeeActiveArea(&out.data);
+        ApplyProcessedRawCropHint(decode_hints, &out.data);
         out.state = ColorState::kWorkingLinear;
         out.color_space = "rec_2020_linear";
         out.raw_provenance = MakeRawDecodeProvenance(
@@ -390,6 +440,7 @@ RawProvenanceProbeResult ProbeRawProvenance(const std::filesystem::path& path,
     }
     const RawSensorClass raw_class =
         ClassifyRawSensor(RawClassificationFromLibRaw(*raw));
+    result.sensor_hints = RawDecodeHintSummary(RawDecodeHintsFromLibRaw(*raw));
     result.provenance = MakeRawDecodeProvenance(
         raw_class, RawDecodeModeFor(decode_mode), target);
     result.reason = RawDecodePolicyTargetReason(result.provenance.policy, target);

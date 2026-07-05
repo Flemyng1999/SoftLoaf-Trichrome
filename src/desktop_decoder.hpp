@@ -17,6 +17,7 @@ enum class DecodeMode {
 struct RawProvenanceProbeResult {
     bool ok = false;
     std::string reason = "probe_not_started";
+    std::string sensor_hints = "none";
     RawDecodeProvenance provenance;
 };
 

@@ -5,7 +5,7 @@
 namespace softloaf::trichrome {
 
 inline constexpr const char* kRawDecodePolicyKey =
-    "raw-boundary-v1:rec2020-cfa-only:packed-fullcolor-fallback:leica-sl2-matrix";
+    "raw-boundary-v2:rec2020-cfa-only:packed-fullcolor-fallback:rt-white:sony-packed-hints:canon70d-sraw-white:leica-sl2-matrix";
 inline constexpr const char* kRawProvenanceSchemaKey = "raw-provenance-v1";
 
 enum class RawSensorClass {
