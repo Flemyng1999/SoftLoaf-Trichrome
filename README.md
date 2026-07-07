@@ -19,6 +19,8 @@ with sequential red, green, and blue captures. It imports triplets from RAW or
 standard image files, previews the composed color frame, and exports finished
 images for editing or archival workflows.
 
+![SoftLoaf Trichrome workspace showing imported frames and a composite preview](docs/screenshots/workspace-preview.png)
+
 This project is currently beta software. The trichrome workflow, export path,
 and release packaging are ready for broader testing, while RAW camera
 correctness remains guarded by explicit provenance boundaries.
@@ -53,14 +55,81 @@ release.
 - Select export color spaces including sRGB, Display P3, Adobe RGB, Rec.2020,
   ProPhoto RGB Linear, ACES AP0 Linear, and ACEScg/AP1 Linear.
 
-## Workflow
+## First Run Tutorial
 
-1. Click `Import` and choose three-shot source files or a folder.
-2. Choose the sensor mode: `Bayer` or `Monochrome`.
-3. Choose grouping mode and channel order, such as `RGB` or `BGR`.
-4. Select a complete frame from the sidebar.
-5. Preview the composed result.
-6. Export a single frame or all complete frames.
+SoftLoaf Trichrome expects each finished color image to come from three source
+captures: one red-filter exposure, one green-filter exposure, and one
+blue-filter exposure.
+
+### 1. Prepare a capture folder
+
+Put the files for a roll, contact sheet, or test set in one folder. The easiest
+starting point is filename order:
+
+```text
+DSCF0195.RAF  red exposure
+DSCF0196.RAF  green exposure
+DSCF0197.RAF  blue exposure
+DSCF0198.RAF  red exposure
+DSCF0199.RAF  green exposure
+DSCF0200.RAF  blue exposure
+```
+
+If your camera or scanning workflow records the channels in another order, keep
+the files together and use the `Order` control after import.
+
+### 2. Import the files
+
+Click `Import` and choose either individual source files or a folder. SoftLoaf
+will scan the selection, split the sources into three-channel frames, and show
+the result in the left sidebar.
+
+Each complete frame should show one `R`, one `G`, and one `B` source. If a frame
+looks incomplete or the channels are assigned incorrectly, check the grouping
+controls before exporting.
+
+### 3. Choose the source assumptions
+
+Use the controls under `Import` to describe the source set:
+
+- `Sensor`: choose `Bayer` for normal color-camera RAW files, or `Monochrome`
+  for monochrome camera or already-separated sources.
+- `Grouping`: choose how SoftLoaf should form R/G/B triplets. `Filename` is the
+  best default when captures are named in shooting order.
+- `Order`: choose the channel order in the source sequence, such as `RGB` or
+  `BGR`.
+
+Changing these controls reprocesses the imported files, so you can correct the
+setup without importing again.
+
+### 4. Review the composite preview
+
+Select a frame in the sidebar and inspect the large `Composite preview`. The
+preview is meant for checking registration, channel order, and obvious exposure
+problems before committing time to export.
+
+Use the frame list to move through a roll. The count at the top of the sidebar
+shows how many complete frames SoftLoaf found.
+
+### 5. Export finished images
+
+Click `Export` in the upper-right corner to open the export window.
+
+![SoftLoaf Trichrome export settings window](docs/screenshots/export-settings.png)
+
+Choose:
+
+- `Range`: export the `Current frame` or `All complete frames`.
+- `Format`: export as `TIFF`.
+- `Color Space`: choose the handoff color space for your next editing or
+  archival step.
+- `Bit Depth`: choose `16-bit` for editing headroom, or `8-bit` when you need
+  smaller files.
+- `Suffix`: customize the text appended to exported filenames.
+
+Click `Choose...` to pick an export folder, then click `Start Export`.
+
+### Supported Inputs
 
 Supported RAW containers include common camera files such as `.3fr`, `.dng`,
 `.arw`, `.cr2`, `.cr3`, `.nef`, `.raf`, `.rw2`, `.orf`, `.pef`, and `.srw`,
