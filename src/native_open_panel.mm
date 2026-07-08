@@ -26,6 +26,10 @@ std::vector<std::filesystem::path> NativeOpenFilesOrFolders(const char* title) {
                     : ext;
                 NSString* ns_ext = [NSString stringWithUTF8String:bare_ext.c_str()];
                 UTType* type = [UTType typeWithFilenameExtension:ns_ext];
+                if (!type) {
+                    type = [UTType typeWithFilenameExtension:ns_ext
+                                            conformingToType:UTTypeData];
+                }
                 if (type) [types addObject:type];
             }
             if (types.count > 0) panel.allowedContentTypes = types;
