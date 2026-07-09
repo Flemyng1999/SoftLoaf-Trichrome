@@ -42,6 +42,23 @@ std::string LowerExt(const std::filesystem::path& path) {
     return ext;
 }
 
+const char* kRawExts[] = {
+    ".3fr", ".ari", ".arq", ".arw", ".cam", ".cr2", ".cr3", ".crw",
+    ".dcr", ".dng", ".erf", ".fff", ".gpr", ".iiq", ".kdc", ".lri",
+    ".mdc", ".mef", ".mos", ".mrw", ".nef", ".nrw", ".orf", ".ori",
+    ".pef", ".raf", ".raw", ".rw2", ".rwl", ".sr2", ".srf", ".srw",
+    ".sti", ".x3f",
+};
+
+int OpenLibRawFile(LibRaw& raw, const std::filesystem::path& path) {
+#if defined(_WIN32)
+    return raw.open_file(path.wstring().c_str());
+#else
+    const std::string raw_path = QStringFromPath(path).toUtf8().toStdString();
+    return raw.open_file(raw_path.c_str());
+#endif
+}
+
 float SrgbToLinear(float v) {
     v = std::clamp(v, 0.0f, 1.0f);
     if (v <= 0.04045f) return v / 12.92f;
@@ -316,12 +333,7 @@ ImageBuf DecodeRawImage(const std::filesystem::path& path,
     ImageBuf out;
     // Keep LibRaw off the stack; large RAW decode paths can be stack-hungry.
     auto raw = std::make_unique<LibRaw>();
-#if defined(_WIN32)
-    if (raw->open_file(path.wstring().c_str()) != LIBRAW_SUCCESS) return out;
-#else
-    const std::string raw_path = QStringFromPath(path).toUtf8().toStdString();
-    if (raw->open_file(raw_path.c_str()) != LIBRAW_SUCCESS) return out;
-#endif
+    if (OpenLibRawFile(*raw, path) != LIBRAW_SUCCESS) return out;
     if (raw->unpack() != LIBRAW_SUCCESS) return out;
     const RawDecodeHintInput decode_hints = RawDecodeHintsFromLibRaw(*raw);
     const RawSensorClass raw_class =
@@ -382,12 +394,7 @@ ImageBuf DecodeRawRec2020Image(const std::filesystem::path& path,
                                bool use_camera_wb) {
     ImageBuf out;
     auto raw = std::make_unique<LibRaw>();
-#if defined(_WIN32)
-    if (raw->open_file(path.wstring().c_str()) != LIBRAW_SUCCESS) return out;
-#else
-    const std::string raw_path = QStringFromPath(path).toUtf8().toStdString();
-    if (raw->open_file(raw_path.c_str()) != LIBRAW_SUCCESS) return out;
-#endif
+    if (OpenLibRawFile(*raw, path) != LIBRAW_SUCCESS) return out;
     if (raw->unpack() != LIBRAW_SUCCESS) return out;
     const RawDecodeHintInput decode_hints = RawDecodeHintsFromLibRaw(*raw);
     const RawSensorClass raw_class =
@@ -430,13 +437,35 @@ ImageBuf DecodeRawRec2020Image(const std::filesystem::path& path,
 }  // namespace
 
 bool LooksLikeRaw(const std::filesystem::path& path) {
-    return IsRawLikeExtension(LowerExt(path));
+    const std::string ext = LowerExt(path);
+    for (const char* raw_ext : kRawExts) {
+        if (ext == raw_ext) return true;
+    }
+    return false;
+}
+
+bool LibRawRecognizesTiffRaw(const std::filesystem::path& path) {
+    const std::string ext = LowerExt(path);
+    if (ext != ".tif" && ext != ".tiff") return false;
+    LibRaw raw;
+    if (OpenLibRawFile(raw, path) != LIBRAW_SUCCESS) return false;
+    const auto& sizes = raw.imgdata.sizes;
+    const bool recognized =
+        raw.imgdata.idata.raw_count > 0 &&
+        sizes.raw_width > 0 && sizes.raw_height > 0 &&
+        sizes.width > 0 && sizes.height > 0;
+    raw.recycle();
+    return recognized;
+}
+
+bool ShouldDecodeWithLibRaw(const std::filesystem::path& path) {
+    return LooksLikeRaw(path) || LibRawRecognizesTiffRaw(path);
 }
 
 ImageBuf DecodeLinear(const std::filesystem::path& path,
                       bool force_mono,
                       DecodeMode decode_mode) {
-    if (LooksLikeRaw(path)) {
+    if (ShouldDecodeWithLibRaw(path)) {
         return DecodeRawImage(path, force_mono, decode_mode);
     }
     return DecodeRegularImage(path, force_mono);
@@ -445,7 +474,7 @@ ImageBuf DecodeLinear(const std::filesystem::path& path,
 ImageBuf DecodeRawToLinearRec2020(const std::filesystem::path& path,
                                   DecodeMode decode_mode,
                                   bool use_camera_wb) {
-    if (!LooksLikeRaw(path)) return {};
+    if (!ShouldDecodeWithLibRaw(path)) return {};
     return DecodeRawRec2020Image(path, decode_mode, use_camera_wb);
 }
 
@@ -453,23 +482,15 @@ RawProvenanceProbeResult ProbeRawProvenance(const std::filesystem::path& path,
                                             DecodeMode decode_mode,
                                             RawDecodeTarget target) {
     RawProvenanceProbeResult result;
-    if (!LooksLikeRaw(path)) {
+    if (!ShouldDecodeWithLibRaw(path)) {
         result.reason = "not_raw_extension";
         return result;
     }
     auto raw = std::make_unique<LibRaw>();
-#if defined(_WIN32)
-    if (raw->open_file(path.wstring().c_str()) != LIBRAW_SUCCESS) {
+    if (OpenLibRawFile(*raw, path) != LIBRAW_SUCCESS) {
         result.reason = "raw_open_failed";
         return result;
     }
-#else
-    const std::string raw_path = QStringFromPath(path).toUtf8().toStdString();
-    if (raw->open_file(raw_path.c_str()) != LIBRAW_SUCCESS) {
-        result.reason = "raw_open_failed";
-        return result;
-    }
-#endif
     FillRawProbeMetadata(*raw, &result);
     if (raw->unpack() != LIBRAW_SUCCESS) {
         result.reason = "raw_unpack_failed";

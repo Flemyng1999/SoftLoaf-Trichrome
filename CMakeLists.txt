@@ -91,6 +91,8 @@ if(SOFTLOAF_TRICHROME_BUILD_APP)
         src/main.cpp
         src/desktop_decoder.cpp
         src/desktop_decoder.hpp
+        src/export_encode_backend.cpp
+        src/export_encode_backend.hpp
         ${SOFTLOAF_TRICHROME_NATIVE_OPEN_PANEL}
         src/obs_log.cpp
         src/obs_log.hpp
@@ -119,6 +121,18 @@ if(SOFTLOAF_TRICHROME_BUILD_APP)
     if(APPLE)
         set_source_files_properties(src/native_open_panel.mm
             PROPERTIES LANGUAGE OBJCXX COMPILE_FLAGS "-fobjc-arc")
+        target_sources(softloaf_trichrome_app PRIVATE
+            src/export_encode_backend_metal.mm)
+        set_source_files_properties(src/export_encode_backend_metal.mm
+            PROPERTIES LANGUAGE OBJCXX COMPILE_FLAGS "-fobjc-arc")
+        target_link_libraries(softloaf_trichrome_app PRIVATE
+            "-framework Metal"
+            "-framework Foundation")
+    elseif(WIN32)
+        target_sources(softloaf_trichrome_app PRIVATE
+            src/export_encode_backend_d3d12.cpp)
+        target_link_libraries(softloaf_trichrome_app PRIVATE
+            d3d12 dxgi dxguid d3dcompiler)
     endif()
 
     qt_add_qml_module(softloaf_trichrome_app
@@ -185,6 +199,7 @@ if(SOFTLOAF_TRICHROME_BUILD_TESTS)
     if(SOFTLOAF_TRICHROME_BUILD_APP)
         add_executable(trichrome_desktop_core_test
             tests/trichrome_desktop_core_test.cpp
+            src/desktop_decoder.cpp
             src/obs_log.cpp
             src/trichrome_cache.cpp)
         target_include_directories(trichrome_desktop_core_test PRIVATE
@@ -192,6 +207,7 @@ if(SOFTLOAF_TRICHROME_BUILD_TESTS)
         target_link_libraries(trichrome_desktop_core_test PRIVATE
             softloaf_trichrome
             softloaf_trichrome_color
+            ${SOFTLOAF_LIBRAW_TARGET}
             Qt6::Core
             Qt6::Gui)
         add_test(NAME trichrome_desktop_core COMMAND trichrome_desktop_core_test)

@@ -2,8 +2,10 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -28,6 +30,7 @@
 #include <opencv2/imgproc.hpp>
 
 #include "desktop_decoder.hpp"
+#include "export_encode_backend.hpp"
 #include "export_naming.hpp"
 #include "native_open_panel.hpp"
 #include "obs_log.hpp"
@@ -45,6 +48,15 @@ constexpr int kPreviewCacheMaxEdge = 2048;
 constexpr int kBackgroundFrameConcurrencyCap = 4;
 constexpr const char* kDisplayColorSpace = "srgb";
 constexpr uint64_t kGiB = 1024ull * 1024ull * 1024ull;
+using SteadyClock = std::chrono::steady_clock;
+
+int64_t DurationMs(SteadyClock::time_point begin, SteadyClock::time_point end) {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count();
+}
+
+int64_t ElapsedMs(SteadyClock::time_point begin) {
+    return DurationMs(begin, SteadyClock::now());
+}
 
 QString BaseName(const std::filesystem::path& path) {
     return QStringFromPath(path.filename());
@@ -218,6 +230,42 @@ QImage LinearRgbToQImage(const ImageBuf& image,
     const auto* space = color::LookupColorSpace(color_space.toStdString());
     if (!space) space = &color::kAcesAp0Linear;
     const QImage::Format format = ExportImageFormat(bit_depth);
+    if (format == QImage::Format_RGBX64) {
+        const auto gpu_start = SteadyClock::now();
+        cv::Mat encoded;
+        IExportEncodeBackend& backend = DefaultExportEncodeBackend();
+        if (backend.EncodeRgbx64(image, *space, &encoded) &&
+            !encoded.empty() && encoded.type() == CV_16UC4 &&
+            encoded.cols == image.width() && encoded.rows == image.height()) {
+            QImage out(image.width(), image.height(), format);
+            for (int y = 0; y < image.height(); ++y) {
+                std::memcpy(out.scanLine(y), encoded.ptr(y),
+                            static_cast<size_t>(image.width()) * 4 * sizeof(quint16));
+            }
+            ObsLog("export.phase", {{"phase", "encode_qimage_gpu"},
+                                    {"backend", backend.name()},
+                                    {"duration_ms", std::to_string(ElapsedMs(gpu_start))},
+                                    {"width", std::to_string(image.width())},
+                                    {"height", std::to_string(image.height())},
+                                    {"color_space", space->id.data()},
+                                    {"result", "ok"}});
+            const std::vector<unsigned char> icc = color::CreateIccProfile(*space);
+            if (!icc.empty()) {
+                const QByteArray bytes(reinterpret_cast<const char*>(icc.data()),
+                                       static_cast<int>(icc.size()));
+                const QColorSpace qt_space = QColorSpace::fromIccProfile(bytes);
+                if (qt_space.isValid()) out.setColorSpace(qt_space);
+            }
+            return out;
+        }
+        ObsLog("export.phase", {{"phase", "encode_qimage_gpu"},
+                                {"backend", backend.name()},
+                                {"duration_ms", std::to_string(ElapsedMs(gpu_start))},
+                                {"width", std::to_string(image.width())},
+                                {"height", std::to_string(image.height())},
+                                {"color_space", space->id.data()},
+                                {"result", "fallback_cpu"}});
+    }
     QImage out(image.width(), image.height(), format);
     for (int y = 0; y < image.height(); ++y) {
         const auto* src = image.data.ptr<cv::Vec3f>(y);
@@ -290,9 +338,22 @@ ComposeResult ComposeGroupSequential(const ProjectTrichromeGroup& group,
     if (bayer) bayer_cross_check_sources.reserve(group.sources.size());
     try {
         for (const ProjectTrichromeSource& source : group.sources) {
+            const auto decode_start = SteadyClock::now();
             ImageBuf image = DecodeLinear(
                 PathFromQString(QString::fromUtf8(source.path)), force_mono,
                 decode_mode);
+            const int64_t decode_ms = ElapsedMs(decode_start);
+            ObsLog("trichrome.decode", {{"role", source.role},
+                                         {"path", source.path},
+                                         {"decode_mode", decode_mode == DecodeMode::kPreview
+                                             ? "preview" : "export"},
+                                         {"force_mono", force_mono ? "true" : "false"},
+                                         {"duration_ms", std::to_string(decode_ms)},
+                                         {"width", std::to_string(image.width())},
+                                         {"height", std::to_string(image.height())},
+                                         {"channels", std::to_string(image.data.channels())},
+                                         {"empty", image.data.empty() ? "true" : "false"},
+                                         {"color_space", image.color_space}});
             if (bayer) {
                 const int channel = ExpectedChannelForRole(source.role);
                 if (channel >= 0) {
@@ -344,18 +405,77 @@ QImage ComposeGroupToEncodedImage(const ProjectTrichromeGroup& group,
                                   int bit_depth,
                                   QString* reason) {
     const bool force_mono = sensor_mode != "bayer";
+    const bool log_export_timing = decode_mode == DecodeMode::kExport;
+    const auto total_start = SteadyClock::now();
+    const auto compose_start = total_start;
     ComposeResult result = ComposeGroupSequential(group, force_mono, decode_mode);
+    const int64_t compose_ms = ElapsedMs(compose_start);
+    if (log_export_timing) {
+        ObsLog("export.phase", {{"phase", "decode_compose"},
+                                {"group", std::to_string(group.group_index)},
+                                {"duration_ms", std::to_string(compose_ms)},
+                                {"result", result.ok ? "ok" : "fail"},
+                                {"reason", result.reason}});
+    }
     if (!result.ok) {
         if (reason) *reason = QString::fromStdString(result.reason);
         return {};
     }
+
+    const auto white_start = SteadyClock::now();
     const cv::Vec3d white = EstimateRgbChannelWhite(result.rgb);
+    const int64_t white_ms = ElapsedMs(white_start);
+    if (log_export_timing) {
+        ObsLog("export.phase", {{"phase", "estimate_white"},
+                                {"group", std::to_string(group.group_index)},
+                                {"duration_ms", std::to_string(white_ms)},
+                                {"width", std::to_string(result.rgb.width())},
+                                {"height", std::to_string(result.rgb.height())}});
+    }
+
+    const auto normalize_start = SteadyClock::now();
     NormalizeRgbByChannelWhite(&result.rgb, white);
-    if (max_edge > 0)
+    const int64_t normalize_ms = ElapsedMs(normalize_start);
+    if (log_export_timing) {
+        ObsLog("export.phase", {{"phase", "normalize"},
+                                {"group", std::to_string(group.group_index)},
+                                {"duration_ms", std::to_string(normalize_ms)}});
+    }
+
+    if (max_edge > 0) {
+        const auto resize_start = SteadyClock::now();
         result.rgb = ResizeLongEdge(result.rgb, max_edge);
+        if (log_export_timing) {
+            ObsLog("export.phase", {{"phase", "resize"},
+                                    {"group", std::to_string(group.group_index)},
+                                    {"duration_ms", std::to_string(ElapsedMs(resize_start))},
+                                    {"max_edge", std::to_string(max_edge)},
+                                    {"width", std::to_string(result.rgb.width())},
+                                    {"height", std::to_string(result.rgb.height())}});
+        }
+    }
+
+    const auto encode_start = SteadyClock::now();
     QImage image = LinearRgbToQImage(result.rgb, output_color_space, bit_depth);
+    const int64_t encode_ms = ElapsedMs(encode_start);
+    if (log_export_timing) {
+        ObsLog("export.phase", {{"phase", "encode_qimage"},
+                                {"group", std::to_string(group.group_index)},
+                                {"duration_ms", std::to_string(encode_ms)},
+                                {"color_space", output_color_space.toStdString()},
+                                {"bit_depth", std::to_string(bit_depth)},
+                                {"width", std::to_string(result.rgb.width())},
+                                {"height", std::to_string(result.rgb.height())},
+                                {"result", image.isNull() ? "fail" : "ok"}});
+    }
     if (image.isNull() && reason) *reason = "preview_image_empty";
     else if (reason) *reason = "ok";
+    if (log_export_timing) {
+        ObsLog("export.phase", {{"phase", "compose_to_qimage_total"},
+                                {"group", std::to_string(group.group_index)},
+                                {"duration_ms", std::to_string(ElapsedMs(total_start))},
+                                {"result", image.isNull() ? "fail" : "ok"}});
+    }
     return image;
 }
 
@@ -437,7 +557,8 @@ ComposeTaskResult ComposePreviewFrame(int generation,
     }
     ObsLog("trichrome.compose", {{"event", "finish"},
                                  {"group", std::to_string(group_index)},
-                                 {"result", task_result.ok ? "ok" : "fail"}});
+                                 {"result", task_result.ok ? "ok" : "fail"},
+                                 {"reason", task_result.status.toStdString()}});
     return task_result;
 }
 
@@ -715,6 +836,7 @@ void TrichromeController::exportActiveTo(const QString& folder, const ExportSett
     QPointer<TrichromeController> self(this);
     QThread* worker = QThread::create([self, generation, group, group_index,
                                        sensor_mode, folder, settings]() {
+        const auto task_start = SteadyClock::now();
         ObsLog("task.started", {{"task", "ExportFrame"},
                                 {"generation", std::to_string(generation)},
                                 {"group", std::to_string(group_index)},
@@ -745,15 +867,32 @@ void TrichromeController::exportActiveTo(const QString& folder, const ExportSett
                     self->setStatus(self->export_progress_text_);
                 }, Qt::QueuedConnection);
             }
+            const auto write_start = SteadyClock::now();
             if (!WriteExportImage(image, out, settings, &reason)) {
+                ObsLog("export.phase", {{"phase", "write_tiff"},
+                                        {"group", std::to_string(group_index)},
+                                        {"duration_ms", std::to_string(ElapsedMs(write_start))},
+                                        {"output", QFileInfo(out).fileName().toStdString()},
+                                        {"result", "fail"},
+                                        {"reason", reason.toStdString()}});
                 result.status = "Export failed: " + reason;
             } else {
+                ObsLog("export.phase", {{"phase", "write_tiff"},
+                                        {"group", std::to_string(group_index)},
+                                        {"duration_ms", std::to_string(ElapsedMs(write_start))},
+                                        {"output", QFileInfo(out).fileName().toStdString()},
+                                        {"result", "ok"}});
                 result.ok = true;
                 result.exported = 1;
                 result.status = QString("Exported %1 (%2)")
                     .arg(QFileInfo(out).fileName(), ExportEncodingLabel(settings));
             }
         }
+        ObsLog("export.phase", {{"phase", "export_frame_total"},
+                                {"group", std::to_string(group_index)},
+                                {"duration_ms", std::to_string(ElapsedMs(task_start))},
+                                {"result", result.ok ? "ok" : "fail"},
+                                {"status", result.status.toStdString()}});
         if (!self) return;
         QMetaObject::invokeMethod(self, [self, result = std::move(result)]() {
             if (!self) return;
@@ -767,7 +906,8 @@ void TrichromeController::exportActiveTo(const QString& folder, const ExportSett
             self->setStatus(result.status);
             ObsLog("task.finished", {{"task", "ExportFrame"},
                                      {"generation", std::to_string(result.generation)},
-                                     {"result", result.ok ? "ok" : "fail"}});
+                                     {"result", result.ok ? "ok" : "fail"},
+                                     {"status", result.status.toStdString()}});
         }, Qt::QueuedConnection);
     });
     worker->setObjectName("ExportFrameWorker");
@@ -818,6 +958,7 @@ void TrichromeController::exportAllTo(const QString& folder, const ExportSetting
     QPointer<TrichromeController> self(this);
     QThread* worker = QThread::create([self, generation, groups = std::move(groups),
                                        sensor_mode, folder, settings]() {
+        const auto task_start = SteadyClock::now();
         ObsLog("task.started", {{"task", "ExportAll"},
                                 {"generation", std::to_string(generation)},
                                 {"groups", std::to_string(groups.size())},
@@ -831,6 +972,7 @@ void TrichromeController::exportAllTo(const QString& folder, const ExportSetting
         result.total = static_cast<int>(groups.size());
         QSet<QString> reserved_paths;
         for (size_t i = 0; i < groups.size(); ++i) {
+            const auto frame_start = SteadyClock::now();
             if (QThread::currentThread()->isInterruptionRequested()) {
                 result.status = "Export canceled";
                 break;
@@ -873,11 +1015,30 @@ void TrichromeController::exportAllTo(const QString& folder, const ExportSetting
                     self->setStatus(self->export_progress_text_);
                 }, Qt::QueuedConnection);
             }
+            const auto write_start = SteadyClock::now();
             if (!WriteExportImage(image, out, settings, &reason)) {
+                ObsLog("export.phase", {{"phase", "write_tiff"},
+                                        {"group", std::to_string(groups[i].group_index)},
+                                        {"frame", std::to_string(i + 1)},
+                                        {"duration_ms", std::to_string(ElapsedMs(write_start))},
+                                        {"output", QFileInfo(out).fileName().toStdString()},
+                                        {"result", "fail"},
+                                        {"reason", reason.toStdString()}});
                 result.status = QString("Frame %1 export failed: %2").arg(i + 1).arg(reason);
                 break;
             }
+            ObsLog("export.phase", {{"phase", "write_tiff"},
+                                    {"group", std::to_string(groups[i].group_index)},
+                                    {"frame", std::to_string(i + 1)},
+                                    {"duration_ms", std::to_string(ElapsedMs(write_start))},
+                                    {"output", QFileInfo(out).fileName().toStdString()},
+                                    {"result", "ok"}});
             ++result.exported;
+            ObsLog("export.phase", {{"phase", "export_frame_total"},
+                                    {"group", std::to_string(groups[i].group_index)},
+                                    {"frame", std::to_string(i + 1)},
+                                    {"duration_ms", std::to_string(ElapsedMs(frame_start))},
+                                    {"result", "ok"}});
             if (self) {
                 const int exported = result.exported;
                 const int total = static_cast<int>(groups.size());
@@ -892,9 +1053,15 @@ void TrichromeController::exportAllTo(const QString& folder, const ExportSetting
         }
         result.ok = result.exported == static_cast<int>(groups.size());
         if (result.ok)
-            result.status = QString("Exported %1 frames (%2)")
-                .arg(result.exported)
-                .arg(ExportEncodingLabel(settings));
+                result.status = QString("Exported %1 frames (%2)")
+                    .arg(result.exported)
+                    .arg(ExportEncodingLabel(settings));
+        ObsLog("export.phase", {{"phase", "export_all_total"},
+                                {"duration_ms", std::to_string(ElapsedMs(task_start))},
+                                {"result", result.ok ? "ok" : "fail"},
+                                {"exported", std::to_string(result.exported)},
+                                {"total", std::to_string(result.total)},
+                                {"status", result.status.toStdString()}});
         if (!self) return;
         QMetaObject::invokeMethod(self, [self, result = std::move(result)]() {
             if (!self) return;
@@ -908,7 +1075,9 @@ void TrichromeController::exportAllTo(const QString& folder, const ExportSetting
             ObsLog("task.finished", {{"task", "ExportAll"},
                                      {"generation", std::to_string(result.generation)},
                                      {"result", result.ok ? "ok" : "fail"},
-                                     {"exported", std::to_string(result.exported)}});
+                                     {"exported", std::to_string(result.exported)},
+                                     {"total", std::to_string(result.total)},
+                                     {"status", result.status.toStdString()}});
         }, Qt::QueuedConnection);
     });
     worker->setObjectName("ExportAllWorker");

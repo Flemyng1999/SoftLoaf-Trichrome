@@ -17,14 +17,17 @@
 #include <QUrl>
 
 #include "obs_log.hpp"
+#include "desktop_decoder.hpp"
 #include "export_naming.hpp"
 #include "qt_path_utils.hpp"
 #include "softloaf_trichrome/color_management.hpp"
+#include "softloaf_trichrome/model.hpp"
 #include "trichrome_cache.hpp"
 
 namespace fs = std::filesystem;
 namespace desktop = softloaf::trichrome::desktop;
 namespace color = softloaf::trichrome::color;
+namespace tri = softloaf::trichrome;
 
 namespace {
 
@@ -171,6 +174,34 @@ void TestGeneratedIccProfilesRoundTripThroughTiff() {
     fs::remove_all(root, ec);
 }
 
+void TestRegularTiffDecodeIsNotRawOnly() {
+    assert(tri::IsRawLikeExtension(".tiff"));
+    assert(tri::IsRawLikeExtension(".tif"));
+    assert(tri::IsSupportedStillImageExtension(".tiff"));
+    assert(tri::IsSupportedStillImageExtension(".tif"));
+
+    const fs::path root = fs::temp_directory_path() / "softloaf_trichrome_decode_tiff_test";
+    std::error_code ec;
+    fs::remove_all(root, ec);
+    fs::create_directories(root, ec);
+
+    QImage image(12, 10, QImage::Format_RGBX64);
+    image.fill(QColor(120, 180, 220));
+    const fs::path path = root / "scan.tiff";
+    QImageWriter writer(desktop::QStringFromPath(path), QByteArrayLiteral("tiff"));
+    assert(writer.write(image));
+
+    assert(!desktop::LooksLikeRaw(path));
+    const tri::ImageBuf decoded = desktop::DecodeLinear(path, true, desktop::DecodeMode::kPreview);
+    assert(!decoded.data.empty());
+    assert(decoded.width() == 12);
+    assert(decoded.height() == 10);
+    assert(decoded.data.channels() == 1);
+    assert(decoded.color_space == "linear_srgb");
+
+    fs::remove_all(root, ec);
+}
+
 void TestExportNamingUsesSourceStemAndAvoidsOverwrite() {
     const fs::path root = fs::temp_directory_path() / "softloaf_trichrome_export_name_test";
     std::error_code ec;
@@ -228,6 +259,7 @@ int main(int argc, char** argv) {
     TestPreviewCacheIdentityAndHit();
     TestUnicodePathUtilities();
     TestGeneratedIccProfilesRoundTripThroughTiff();
+    TestRegularTiffDecodeIsNotRawOnly();
     TestExportNamingUsesSourceStemAndAvoidsOverwrite();
     return 0;
 }
