@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <vector>
 #if defined(__APPLE__)
 #include <sys/sysctl.h>
 #include <sys/types.h>
@@ -267,29 +268,40 @@ QImage LinearRgbToQImage(const ImageBuf& image,
                                 {"result", "fallback_cpu"}});
     }
     QImage out(image.width(), image.height(), format);
-    for (int y = 0; y < image.height(); ++y) {
-        const auto* src = image.data.ptr<cv::Vec3f>(y);
-        if (format == QImage::Format_RGBX64) {
+    const color::Mat3 linear_srgb_to_dst = color::LinearSrgbToColorSpaceMatrix(*space);
+    const auto cpu_start = SteadyClock::now();
+    if (format == QImage::Format_RGBX64) {
+        for (int y = 0; y < image.height(); ++y) {
+            const auto* src = image.data.ptr<cv::Vec3f>(y);
             auto* dst = reinterpret_cast<quint16*>(out.scanLine(y));
             for (int x = 0; x < image.width(); ++x) {
                 const color::Vec3 encoded = color::ConvertLinearSrgbToEncoded(
-                    *space, {src[x][0], src[x][1], src[x][2]});
+                    *space, linear_srgb_to_dst, {src[x][0], src[x][1], src[x][2]});
                 dst[4 * x + 0] = Quantize16(encoded[0]);
                 dst[4 * x + 1] = Quantize16(encoded[1]);
                 dst[4 * x + 2] = Quantize16(encoded[2]);
                 dst[4 * x + 3] = 0xffff;
             }
-        } else {
+        }
+    } else {
+        for (int y = 0; y < image.height(); ++y) {
+            const auto* src = image.data.ptr<cv::Vec3f>(y);
             auto* dst = out.scanLine(y);
             for (int x = 0; x < image.width(); ++x) {
                 const color::Vec3 encoded = color::ConvertLinearSrgbToEncoded(
-                    *space, {src[x][0], src[x][1], src[x][2]});
+                    *space, linear_srgb_to_dst, {src[x][0], src[x][1], src[x][2]});
                 dst[3 * x + 0] = Quantize8(encoded[0]);
                 dst[3 * x + 1] = Quantize8(encoded[1]);
                 dst[3 * x + 2] = Quantize8(encoded[2]);
             }
         }
     }
+    ObsLog("export.phase", {{"phase", "encode_qimage_cpu"},
+                            {"backend", DefaultExportEncodeBackend().name()},
+                            {"duration_ms", std::to_string(ElapsedMs(cpu_start))},
+                            {"width", std::to_string(image.width())},
+                            {"height", std::to_string(image.height())},
+                            {"color_space", space->id.data()}});
 
     const std::vector<unsigned char> icc = color::CreateIccProfile(*space);
     if (!icc.empty()) {

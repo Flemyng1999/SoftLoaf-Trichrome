@@ -262,13 +262,19 @@ inline double EncodeTransfer(double linear, const RgbColorSpace& dst) {
     return linear;
 }
 
-inline Vec3 ConvertLinearSrgbToEncoded(const RgbColorSpace& dst, Vec3 rgb) {
-    const Vec3 target_linear = Mul(LinearSrgbToColorSpaceMatrix(dst), rgb);
+inline Vec3 ConvertLinearSrgbToEncoded(const RgbColorSpace& dst,
+                                       const Mat3& linear_srgb_to_dst,
+                                       Vec3 rgb) {
+    const Vec3 target_linear = Mul(linear_srgb_to_dst, rgb);
     return {
         EncodeTransfer(target_linear[0], dst),
         EncodeTransfer(target_linear[1], dst),
         EncodeTransfer(target_linear[2], dst),
     };
+}
+
+inline Vec3 ConvertLinearSrgbToEncoded(const RgbColorSpace& dst, Vec3 rgb) {
+    return ConvertLinearSrgbToEncoded(dst, LinearSrgbToColorSpaceMatrix(dst), rgb);
 }
 
 std::vector<unsigned char> CreateIccProfile(const RgbColorSpace& space);

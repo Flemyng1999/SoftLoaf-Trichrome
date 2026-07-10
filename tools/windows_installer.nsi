@@ -3,10 +3,10 @@ ManifestDPIAware true
 RequestExecutionLevel admin
 
 !ifndef APP_VERSION
-  !define APP_VERSION "0.2.0-beta.3"
+  !define APP_VERSION "0.2.0-beta.4"
 !endif
 !ifndef APP_VERSION_QUAD
-  !define APP_VERSION_QUAD "0.2.0.3"
+  !define APP_VERSION_QUAD "0.2.0.4"
 !endif
 !ifndef APP_STAGE
   !error "APP_STAGE must be provided"

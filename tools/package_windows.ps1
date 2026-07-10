@@ -5,7 +5,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$InstallRoot,
 
-    [string]$Version = "0.2.0-beta.3",
+    [string]$Version = "0.2.0-beta.4",
     [string]$OutDir = "",
     [string]$Configuration = "Release",
     [string]$AppName = "SoftLoaf Trichrome",

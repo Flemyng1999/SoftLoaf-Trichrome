@@ -6,7 +6,7 @@ on:
       version:
         description: Release version without the leading v
         required: true
-        default: 0.2.0-beta.3
+        default: 0.2.0-beta.4
       create_draft_release:
         description: Create a GitHub draft release from the notarized DMG
         type: boolean

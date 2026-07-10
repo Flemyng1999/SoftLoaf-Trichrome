@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-dmg="${1:-build/SoftLoaf-Trichrome-0.2.0-beta.3-macOS.dmg}"
+dmg="${1:-build/SoftLoaf-Trichrome-0.2.0-beta.4-macOS.dmg}"
 
 if [[ ! -f "${dmg}" ]]; then
   echo "notarize-macos: missing DMG: ${dmg}" >&2

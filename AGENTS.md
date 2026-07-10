@@ -1,5 +1,13 @@
 # Repository Notes
 
+## Windows 11 303mini Test Environment
+
+When testing Windows builds on `303mini`, use the fixed environment notes in
+`docs/windows11_303mini_environment.md`. Prefer the documented paths for
+Visual Studio Build Tools, Qt, CMake/Ninja, vcpkg, the reusable installed
+dependency tree, and the scratch checkout. Do not rediscover the Windows
+toolchain from scratch unless one of those paths fails.
+
 ## macOS Notarization Secret Pointer
 
 The local Apple app-specific password for notarization is stored outside this
