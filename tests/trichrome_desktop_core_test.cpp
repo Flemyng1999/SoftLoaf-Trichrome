@@ -19,6 +19,7 @@
 #include "obs_log.hpp"
 #include "desktop_decoder.hpp"
 #include "export_naming.hpp"
+#include "export_writer.hpp"
 #include "qt_path_utils.hpp"
 #include "softloaf_trichrome/color_management.hpp"
 #include "softloaf_trichrome/model.hpp"
@@ -245,6 +246,31 @@ void TestExportNamingUsesSourceStemAndAvoidsOverwrite() {
     fs::remove_all(root, ec);
 }
 
+void TestSafeExportWriterHandlesUnicodeAndFailures() {
+    const fs::path root = fs::temp_directory_path() / "softloaf 导出稳定性 test";
+    std::error_code ec;
+    fs::remove_all(root, ec);
+    fs::create_directories(root, ec);
+
+    QImage image(12, 10, QImage::Format_RGBX64);
+    image.fill(QColor(60, 120, 180));
+    QString reason;
+    const QString output = desktop::QStringFromPath(root / "中文成片.tiff");
+    assert(desktop::WriteExportImageSafely(
+        image, output, QByteArrayLiteral("tiff"), &reason));
+    assert(reason == QStringLiteral("ok"));
+    assert(!QImageReader(output, QByteArrayLiteral("tiff")).read().isNull());
+
+    const QString missing_parent =
+        desktop::QStringFromPath(root / "disconnected" / "frame.tiff");
+    assert(!desktop::WriteExportImageSafely(
+        image, missing_parent, QByteArrayLiteral("tiff"), &reason));
+    assert(!reason.isEmpty());
+    assert(!QFileInfo::exists(missing_parent));
+
+    fs::remove_all(root, ec);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -261,5 +287,6 @@ int main(int argc, char** argv) {
     TestGeneratedIccProfilesRoundTripThroughTiff();
     TestRegularTiffDecodeIsNotRawOnly();
     TestExportNamingUsesSourceStemAndAvoidsOverwrite();
+    TestSafeExportWriterHandlesUnicodeAndFailures();
     return 0;
 }

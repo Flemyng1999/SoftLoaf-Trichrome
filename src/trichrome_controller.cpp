@@ -33,6 +33,7 @@
 #include "desktop_decoder.hpp"
 #include "export_encode_backend.hpp"
 #include "export_naming.hpp"
+#include "export_writer.hpp"
 #include "native_open_panel.hpp"
 #include "obs_log.hpp"
 #include "qt_path_utils.hpp"
@@ -317,22 +318,7 @@ bool WriteExportImage(const QImage& image,
                       const QString& path,
                       const TrichromeController::ExportSettings& settings,
                       QString* reason) {
-    const QByteArray format_name = ExportFormatName();
-    const QList<QByteArray> supported_formats = QImageWriter::supportedImageFormats();
-    if (!supported_formats.contains(format_name)) {
-        if (reason) {
-            *reason = QString("%1 export unavailable: Qt image format plugin is missing")
-                .arg(QString::fromLatin1(format_name).toUpper());
-        }
-        return false;
-    }
-    QImageWriter writer(path, format_name);
-    if (!writer.write(image)) {
-        if (reason) *reason = writer.errorString();
-        return false;
-    }
-    if (reason) *reason = "ok";
-    return true;
+    return WriteExportImageSafely(image, path, ExportFormatName(), reason);
 }
 
 ComposeResult ComposeGroupSequential(const ProjectTrichromeGroup& group,
