@@ -254,6 +254,40 @@ void TestLinearMonoTiffDecodeAndCompose() {
     fs::remove_all(root, ec);
 }
 
+void TestRegularRgbPngUsesEmbeddedIcc() {
+    const fs::path root = fs::temp_directory_path() / "softloaf_trichrome_rgb_icc_test";
+    std::error_code ec;
+    fs::remove_all(root, ec);
+    fs::create_directories(root, ec);
+
+    const std::vector<unsigned char> icc = color::CreateIccProfile(color::kRec2020Linear);
+    const QByteArray bytes(reinterpret_cast<const char*>(icc.data()),
+                           static_cast<int>(icc.size()));
+    const QColorSpace rec2020_linear = QColorSpace::fromIccProfile(bytes);
+    assert(rec2020_linear.isValid());
+
+    QImage image(1, 1, QImage::Format_RGBX64);
+    image.setPixelColor(0, 0, QColor::fromRgbF(0.5, 0.0, 0.0));
+    image.setColorSpace(rec2020_linear);
+    const fs::path path = root / "linear_rec2020.png";
+    QImageWriter writer(desktop::QStringFromPath(path), QByteArrayLiteral("png"));
+    assert(writer.write(image));
+
+    const tri::ImageBuf decoded = desktop::DecodeLinear(
+        path, false, desktop::DecodeMode::kPreview);
+    assert(!decoded.empty());
+    assert(decoded.channels() == 3);
+    assert(decoded.color_space == "linear_srgb");
+    const cv::Vec3f pixel = decoded.data.at<cv::Vec3f>(0, 0);
+    // Linear Rec.2020 red is not encoded sRGB red.  Its conversion to linear
+    // sRGB has a red component above the source 0.5 and negative G/B components.
+    assert(pixel[0] > 0.6f);
+    assert(pixel[1] < -0.05f);
+    assert(pixel[2] < -0.005f);
+
+    fs::remove_all(root, ec);
+}
+
 void TestExportNamingUsesSourceStemAndAvoidsOverwrite() {
     const fs::path root = fs::temp_directory_path() / "softloaf_trichrome_export_name_test";
     std::error_code ec;
@@ -338,6 +372,7 @@ int main(int argc, char** argv) {
     TestGeneratedIccProfilesRoundTripThroughTiff();
     TestRegularTiffDecodeIsNotRawOnly();
     TestLinearMonoTiffDecodeAndCompose();
+    TestRegularRgbPngUsesEmbeddedIcc();
     TestExportNamingUsesSourceStemAndAvoidsOverwrite();
     TestSafeExportWriterHandlesUnicodeAndFailures();
     return 0;
