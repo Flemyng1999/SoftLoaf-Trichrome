@@ -21,6 +21,7 @@
 #endif
 
 #include <libraw/libraw.h>
+#include <lcms2.h>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 
@@ -59,20 +60,78 @@ int OpenLibRawFile(LibRaw& raw, const std::filesystem::path& path) {
 #endif
 }
 
-float SrgbToLinear(float v) {
-    v = std::clamp(v, 0.0f, 1.0f);
-    if (v <= 0.04045f) return v / 12.92f;
-    return std::pow((v + 0.055f) / 1.055f, 2.4f);
+struct CmsProfileDeleter {
+    void operator()(cmsHPROFILE profile) const {
+        if (profile) cmsCloseProfile(profile);
+    }
+};
+
+struct CmsCurveDeleter {
+    void operator()(cmsToneCurve* curve) const {
+        if (curve) cmsFreeToneCurve(curve);
+    }
+};
+
+struct CmsTransformDeleter {
+    void operator()(cmsHTRANSFORM transform) const {
+        if (transform) cmsDeleteTransform(transform);
+    }
+};
+
+using CmsProfile = std::unique_ptr<void, CmsProfileDeleter>;
+using CmsCurve = std::unique_ptr<cmsToneCurve, CmsCurveDeleter>;
+using CmsTransform = std::unique_ptr<void, CmsTransformDeleter>;
+
+CmsProfile CreateLinearSrgbProfile() {
+    cmsCIExyY white{0.3127, 0.3290, 1.0};
+    cmsCIExyYTRIPLE primaries{};
+    primaries.Red = {0.6400, 0.3300, 1.0};
+    primaries.Green = {0.3000, 0.6000, 1.0};
+    primaries.Blue = {0.1500, 0.0600, 1.0};
+    CmsCurve linear(cmsBuildGamma(nullptr, 1.0));
+    if (!linear) return {};
+    cmsToneCurve* curves[3] = {linear.get(), linear.get(), linear.get()};
+    return CmsProfile(cmsCreateRGBProfile(&white, &primaries, curves));
 }
 
-void ConvertSrgbMatToLinear(cv::Mat* image) {
-    if (!image || image->empty() || image->depth() != CV_32F) return;
-    const int channels = image->channels();
-    for (int y = 0; y < image->rows; ++y) {
-        float* row = image->ptr<float>(y);
-        for (int x = 0; x < image->cols * channels; ++x)
-            row[x] = SrgbToLinear(row[x]);
+std::vector<unsigned char> EmbeddedIccProfile(const std::vector<int>& metadata_types,
+                                               const std::vector<cv::Mat>& metadata) {
+    for (size_t i = 0; i < metadata.size() && i < metadata_types.size(); ++i) {
+        if (metadata_types[i] != cv::IMAGE_METADATA_ICCP) continue;
+        cv::Mat chunk = metadata[i];
+        if (chunk.empty() || chunk.depth() != CV_8U) continue;
+        if (!chunk.isContinuous()) chunk = chunk.clone();
+        const auto* begin = chunk.ptr<unsigned char>(0);
+        return {begin, begin + chunk.total() * chunk.elemSize()};
     }
+    return {};
+}
+
+cv::Mat ConvertRegularRgbToLinearSrgb(const cv::Mat& encoded_rgb,
+                                      const std::vector<unsigned char>& icc) {
+    if (encoded_rgb.empty() || encoded_rgb.type() != CV_32FC3) return encoded_rgb;
+
+    CmsProfile input;
+    if (!icc.empty()) {
+        input.reset(cmsOpenProfileFromMem(icc.data(),
+                                          static_cast<cmsUInt32Number>(icc.size())));
+    }
+    if (!input) input.reset(cmsCreate_sRGBProfile());
+    if (!input || cmsGetColorSpace(input.get()) != cmsSigRgbData) return encoded_rgb;
+
+    CmsProfile linear_srgb = CreateLinearSrgbProfile();
+    if (!linear_srgb) return encoded_rgb;
+    CmsTransform transform(cmsCreateTransform(
+        input.get(), TYPE_RGB_FLT, linear_srgb.get(), TYPE_RGB_FLT,
+        INTENT_RELATIVE_COLORIMETRIC, cmsFLAGS_NOOPTIMIZE));
+    if (!transform) return encoded_rgb;
+
+    cv::Mat out(encoded_rgb.size(), CV_32FC3);
+    const cv::Mat contiguous = encoded_rgb.isContinuous()
+        ? encoded_rgb : encoded_rgb.clone();
+    cmsDoTransform(transform.get(), contiguous.ptr<float>(0), out.ptr<float>(0),
+                   static_cast<cmsUInt32Number>(contiguous.total()));
+    return out;
 }
 
 std::array<double, 9> CameraToXyzD50(const LibRaw& raw, bool* ok) {
@@ -296,7 +355,10 @@ ImageBuf DecodeRegularImage(const std::filesystem::path& path, bool force_mono) 
     if (bytes.isEmpty()) return out;
     const auto* first = reinterpret_cast<const unsigned char*>(bytes.constData());
     std::vector<unsigned char> encoded(first, first + bytes.size());
-    cv::Mat input = cv::imdecode(encoded, cv::IMREAD_UNCHANGED);
+    std::vector<int> metadata_types;
+    std::vector<cv::Mat> metadata;
+    cv::Mat input = cv::imdecodeWithMetadata(
+        encoded, metadata_types, metadata, cv::IMREAD_UNCHANGED);
     if (input.empty()) return out;
 
     cv::Mat float_img;
@@ -305,21 +367,29 @@ ImageBuf DecodeRegularImage(const std::filesystem::path& path, bool force_mono) 
         : 1.0;
     input.convertTo(float_img, CV_32F, scale);
 
-    if (float_img.channels() == 4) {
-        cv::cvtColor(float_img, float_img, cv::COLOR_BGRA2BGR);
+    // A single-channel regular image is a sensor plane, not an sRGB gray image:
+    // preserve its normalized code values exactly for Mono Trichrome composition.
+    if (float_img.channels() >= 3) {
+        cv::Mat rgb;
+        if (float_img.channels() == 3) {
+            cv::cvtColor(float_img, rgb, cv::COLOR_BGR2RGB);
+        } else if (float_img.channels() == 4) {
+            cv::cvtColor(float_img, rgb, cv::COLOR_BGRA2RGB);
+        }
+        float_img = ConvertRegularRgbToLinearSrgb(
+            rgb, EmbeddedIccProfile(metadata_types, metadata));
     }
-    ConvertSrgbMatToLinear(&float_img);
     if (force_mono) {
         if (float_img.channels() == 1) {
             out.data = float_img;
         } else {
-            cv::cvtColor(float_img, out.data, cv::COLOR_BGR2GRAY);
+            cv::cvtColor(float_img, out.data, cv::COLOR_RGB2GRAY);
         }
     } else {
         if (float_img.channels() == 1) {
             cv::cvtColor(float_img, out.data, cv::COLOR_GRAY2RGB);
         } else {
-            cv::cvtColor(float_img, out.data, cv::COLOR_BGR2RGB);
+            out.data = float_img;
         }
     }
     out.state = ColorState::kWorkingLinear;

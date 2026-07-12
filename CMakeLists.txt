@@ -52,7 +52,7 @@ add_library(softloaf_trichrome INTERFACE)
 target_include_directories(softloaf_trichrome INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>)
-target_link_libraries(softloaf_trichrome INTERFACE ${OpenCV_LIBS})
+target_link_libraries(softloaf_trichrome INTERFACE ${OpenCV_LIBS} ${SOFTLOAF_LCMS_TARGET})
 
 add_library(softloaf_trichrome_color STATIC
     src/color_management.cpp)

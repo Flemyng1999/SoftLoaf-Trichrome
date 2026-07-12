@@ -1,4 +1,5 @@
 #include <cassert>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <mutex>
@@ -16,12 +17,15 @@
 #include <QStandardPaths>
 #include <QUrl>
 
+#include <opencv2/imgcodecs.hpp>
+
 #include "obs_log.hpp"
 #include "desktop_decoder.hpp"
 #include "export_naming.hpp"
 #include "export_writer.hpp"
 #include "qt_path_utils.hpp"
 #include "softloaf_trichrome/color_management.hpp"
+#include "softloaf_trichrome/composer.hpp"
 #include "softloaf_trichrome/model.hpp"
 #include "trichrome_cache.hpp"
 
@@ -203,6 +207,53 @@ void TestRegularTiffDecodeIsNotRawOnly() {
     fs::remove_all(root, ec);
 }
 
+void TestLinearMonoTiffDecodeAndCompose() {
+    const fs::path root = fs::temp_directory_path() / "softloaf_trichrome_mono_tiff_test";
+    std::error_code ec;
+    fs::remove_all(root, ec);
+    fs::create_directories(root, ec);
+
+    const fs::path mono8_path = root / "mono8.tiff";
+    const fs::path mono16_path = root / "mono16.tiff";
+    const cv::Mat mono8(1, 1, CV_8UC1, cv::Scalar(128));
+    const cv::Mat mono16(1, 1, CV_16UC1, cv::Scalar(32768));
+    assert(cv::imwrite(mono8_path.string(), mono8));
+    assert(cv::imwrite(mono16_path.string(), mono16));
+
+    const tri::ImageBuf decoded8 = desktop::DecodeLinear(
+        mono8_path, true, desktop::DecodeMode::kPreview);
+    const tri::ImageBuf decoded16 = desktop::DecodeLinear(
+        mono16_path, true, desktop::DecodeMode::kPreview);
+    const float expected8 = 128.0f / 255.0f;
+    const float expected16 = 32768.0f / 65535.0f;
+    assert(decoded8.is_mono());
+    assert(decoded16.is_mono());
+    assert(std::abs(decoded8.data.at<float>(0, 0) - expected8) < 1e-6f);
+    assert(std::abs(decoded16.data.at<float>(0, 0) - expected16) < 1e-6f);
+    assert(std::abs(decoded8.data.at<float>(0, 0) - 0.21586f) > 0.1f);
+
+    const fs::path red_path = root / "red.tiff";
+    const fs::path green_path = root / "green.tiff";
+    const fs::path blue_path = root / "blue.tiff";
+    const cv::Mat red(1, 1, CV_8UC1, cv::Scalar(64));
+    const cv::Mat green(1, 1, CV_8UC1, cv::Scalar(128));
+    const cv::Mat blue(1, 1, CV_8UC1, cv::Scalar(192));
+    assert(cv::imwrite(red_path.string(), red));
+    assert(cv::imwrite(green_path.string(), green));
+    assert(cv::imwrite(blue_path.string(), blue));
+    const tri::ComposeResult composed = tri::ComposeMonoRgb(
+        desktop::DecodeLinear(red_path, true, desktop::DecodeMode::kPreview),
+        desktop::DecodeLinear(green_path, true, desktop::DecodeMode::kPreview),
+        desktop::DecodeLinear(blue_path, true, desktop::DecodeMode::kPreview));
+    assert(composed.ok);
+    const cv::Vec3f pixel = composed.rgb.data.at<cv::Vec3f>(0, 0);
+    assert(std::abs(pixel[0] - 64.0f / 255.0f) < 1e-6f);
+    assert(std::abs(pixel[1] - 128.0f / 255.0f) < 1e-6f);
+    assert(std::abs(pixel[2] - 192.0f / 255.0f) < 1e-6f);
+
+    fs::remove_all(root, ec);
+}
+
 void TestExportNamingUsesSourceStemAndAvoidsOverwrite() {
     const fs::path root = fs::temp_directory_path() / "softloaf_trichrome_export_name_test";
     std::error_code ec;
@@ -286,6 +337,7 @@ int main(int argc, char** argv) {
     TestUnicodePathUtilities();
     TestGeneratedIccProfilesRoundTripThroughTiff();
     TestRegularTiffDecodeIsNotRawOnly();
+    TestLinearMonoTiffDecodeAndCompose();
     TestExportNamingUsesSourceStemAndAvoidsOverwrite();
     TestSafeExportWriterHandlesUnicodeAndFailures();
     return 0;
