@@ -21,12 +21,15 @@ Window {
     palette.highlight: "#4cbf88"
 
     property url destFolder: ""
+    property var selectedGroupIndexes: []
 
     readonly property color cLabel: "#aab2bb"
     readonly property color cValue: "#f4f0e8"
     readonly property color cRule: "#343a40"
 
-    function openForExport() {
+    function openForExport(groupIndexes) {
+        selectedGroupIndexes = groupIndexes === undefined ? [] : groupIndexes.slice()
+        scopeCombo.currentIndex = selectedGroupIndexes.length > 1 ? 1 : 0
         visible = true
         raise()
         requestActivate()
@@ -39,13 +42,23 @@ Window {
     }
 
     function startExport() {
-        trichromeController.startExport(
-            destFolder,
-            scopeCombo.currentIndex === 1,
-            formatCombo.currentValue,
-            spaceCombo.currentValue,
-            bitDepthCombo.currentValue,
-            suffixField.text)
+        if (scopeCombo.currentIndex === 1) {
+            trichromeController.startExportSelected(
+                destFolder,
+                selectedGroupIndexes,
+                formatCombo.currentValue,
+                spaceCombo.currentValue,
+                bitDepthCombo.currentValue,
+                suffixField.text)
+        } else {
+            trichromeController.startExport(
+                destFolder,
+                scopeCombo.currentIndex === 2,
+                formatCombo.currentValue,
+                spaceCombo.currentValue,
+                bitDepthCombo.currentValue,
+                suffixField.text)
+        }
     }
 
     FolderDialog {
@@ -77,7 +90,7 @@ Window {
                 ThemedComboBox {
                     id: scopeCombo
                     Layout.fillWidth: true
-                    model: ["Current frame", "All complete frames"]
+                    model: ["Current frame", "Selected frames", "All complete frames"]
                     enabled: trichromeController.completeGroupCount > 1 &&
                         !trichromeController.exporting
                 }

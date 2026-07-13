@@ -141,6 +141,12 @@ void TestRawSensorClassificationBoundaries() {
     assert(tri::ClassifyRawSensor(mono) == tri::RawSensorClass::kMonochrome);
     assert(tri::LinearRec2020PolicyFor(tri::ClassifyRawSensor(mono)) ==
            tri::RawLinearRec2020Policy::kUnsupported);
+    assert(tri::RawSensorAllowsTarget(
+        tri::ClassifyRawSensor(mono), tri::RawDecodeTarget::kMonochromeIntensityLinear));
+    assert(!tri::RawSensorAllowsTarget(
+        tri::ClassifyRawSensor(mono), tri::RawDecodeTarget::kCameraNativeLinear));
+    assert(!tri::RawSensorAllowsTarget(
+        tri::ClassifyRawSensor(mono), tri::RawDecodeTarget::kLinearRec2020));
 
     tri::RawClassificationInput foveon;
     foveon.filters = 0;
@@ -239,6 +245,15 @@ void TestRawDecodeProvenanceMapping() {
         "raw_fallback_only_not_rec2020");
     assert(tri::RawDecodeProvenanceSignature(xtrans) !=
            tri::RawDecodeProvenanceSignature(bayer));
+
+    const tri::RawDecodeProvenance mono = tri::MakeRawDecodeProvenance(
+        tri::RawSensorClass::kMonochrome, tri::RawDecodeMode::kExport,
+        tri::RawDecodeTarget::kMonochromeIntensityLinear);
+    assert(mono.target_color_space == "intensity_linear");
+    assert(tri::RawSensorAllowsTarget(
+        mono.raw_class, tri::RawDecodeTarget::kMonochromeIntensityLinear));
+    assert(std::string(tri::RawSensorTargetReason(
+        mono.raw_class, tri::RawDecodeTarget::kMonochromeIntensityLinear)) == "ok");
 
     const tri::RawDecodeProvenance foveon = tri::MakeRawDecodeProvenance(
         tri::RawSensorClass::kFoveon, tri::RawDecodeMode::kExport,

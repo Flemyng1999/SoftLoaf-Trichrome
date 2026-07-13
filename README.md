@@ -21,24 +21,24 @@ images for editing or archival workflows.
 
 ![SoftLoaf Trichrome workspace showing imported frames and a composite preview](docs/screenshots/workspace-preview.png)
 
-This project is currently beta software. The trichrome workflow, export path,
-and release packaging are ready for broader testing, while RAW camera
-correctness remains guarded by explicit provenance boundaries.
+SoftLoaf Trichrome is ready for the first stable desktop release of the
+trichrome import, preview, and TIFF export workflow. RAW camera correctness
+remains guarded by explicit provenance boundaries rather than blanket parity
+claims for every camera.
 
 ## Downloads
 
-Prebuilt beta packages are published on the
+Prebuilt packages are published on the
 [GitHub Releases](https://github.com/Flemyng1999/SoftLoaf-Trichrome/releases)
 page.
 
 | Platform | Package | Status |
 | --- | --- | --- |
 | macOS 15.0 or newer | DMG | Signed and notarized release workflow |
-| Windows 10/11 x64 | Installer and portable zip | Unsigned beta tester build |
+| Windows 10/11 x64 | Installer and portable zip | May be unsigned unless Authenticode signing is configured |
 
-Windows SmartScreen may warn because the beta Windows builds may not yet be
-Authenticode signed. Verify downloads with the `.sha256` files attached to each
-release.
+Windows SmartScreen may warn when a Windows build is not Authenticode signed.
+Verify downloads with the `.sha256` files attached to each release.
 
 ## Features
 
@@ -49,7 +49,7 @@ release.
 - Decode TIFF, JPEG, and PNG inputs through OpenCV.
 - Preview composed trichrome frames in the desktop app.
 - Cache previews for faster repeat interactions.
-- Export the current frame or all complete frames.
+- Export the current frame, selected frames, or all complete frames.
 - Export TIFF output.
 - Choose 8-bit or 16-bit output for handoff.
 - Select export color spaces including sRGB, Display P3, Adobe RGB, Rec.2020,
@@ -119,7 +119,7 @@ Click `Export` in the upper-right corner to open the export window.
 
 Choose:
 
-- `Range`: export the `Current frame` or `All complete frames`.
+- `Range`: export the `Current frame`, `Selected frames`, or `All complete frames`.
 - `Format`: export as `TIFF`.
 - `Color Space`: choose the handoff color space for your next editing or
   archival step.

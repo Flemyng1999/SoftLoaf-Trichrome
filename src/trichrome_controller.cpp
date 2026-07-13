@@ -31,7 +31,6 @@
 #include <opencv2/imgproc.hpp>
 
 #include "desktop_decoder.hpp"
-#include "export_encode_backend.hpp"
 #include "export_naming.hpp"
 #include "export_writer.hpp"
 #include "native_open_panel.hpp"
@@ -232,42 +231,6 @@ QImage LinearRgbToQImage(const ImageBuf& image,
     const auto* space = color::LookupColorSpace(color_space.toStdString());
     if (!space) space = &color::kAcesAp0Linear;
     const QImage::Format format = ExportImageFormat(bit_depth);
-    if (format == QImage::Format_RGBX64) {
-        const auto gpu_start = SteadyClock::now();
-        cv::Mat encoded;
-        IExportEncodeBackend& backend = DefaultExportEncodeBackend();
-        if (backend.EncodeRgbx64(image, *space, &encoded) &&
-            !encoded.empty() && encoded.type() == CV_16UC4 &&
-            encoded.cols == image.width() && encoded.rows == image.height()) {
-            QImage out(image.width(), image.height(), format);
-            for (int y = 0; y < image.height(); ++y) {
-                std::memcpy(out.scanLine(y), encoded.ptr(y),
-                            static_cast<size_t>(image.width()) * 4 * sizeof(quint16));
-            }
-            ObsLog("export.phase", {{"phase", "encode_qimage_gpu"},
-                                    {"backend", backend.name()},
-                                    {"duration_ms", std::to_string(ElapsedMs(gpu_start))},
-                                    {"width", std::to_string(image.width())},
-                                    {"height", std::to_string(image.height())},
-                                    {"color_space", space->id.data()},
-                                    {"result", "ok"}});
-            const std::vector<unsigned char> icc = color::CreateIccProfile(*space);
-            if (!icc.empty()) {
-                const QByteArray bytes(reinterpret_cast<const char*>(icc.data()),
-                                       static_cast<int>(icc.size()));
-                const QColorSpace qt_space = QColorSpace::fromIccProfile(bytes);
-                if (qt_space.isValid()) out.setColorSpace(qt_space);
-            }
-            return out;
-        }
-        ObsLog("export.phase", {{"phase", "encode_qimage_gpu"},
-                                {"backend", backend.name()},
-                                {"duration_ms", std::to_string(ElapsedMs(gpu_start))},
-                                {"width", std::to_string(image.width())},
-                                {"height", std::to_string(image.height())},
-                                {"color_space", space->id.data()},
-                                {"result", "fallback_cpu"}});
-    }
     QImage out(image.width(), image.height(), format);
     const color::Mat3 linear_srgb_to_dst = color::LinearSrgbToColorSpaceMatrix(*space);
     const auto cpu_start = SteadyClock::now();
@@ -297,12 +260,7 @@ QImage LinearRgbToQImage(const ImageBuf& image,
             }
         }
     }
-    ObsLog("export.phase", {{"phase", "encode_qimage_cpu"},
-                            {"backend", DefaultExportEncodeBackend().name()},
-                            {"duration_ms", std::to_string(ElapsedMs(cpu_start))},
-                            {"width", std::to_string(image.width())},
-                            {"height", std::to_string(image.height())},
-                            {"color_space", space->id.data()}});
+    (void)cpu_start;
 
     const std::vector<unsigned char> icc = color::CreateIccProfile(*space);
     if (!icc.empty()) {
@@ -312,13 +270,6 @@ QImage LinearRgbToQImage(const ImageBuf& image,
         if (qt_space.isValid()) out.setColorSpace(qt_space);
     }
     return out;
-}
-
-bool WriteExportImage(const QImage& image,
-                      const QString& path,
-                      const TrichromeController::ExportSettings& settings,
-                      QString* reason) {
-    return WriteExportImageSafely(image, path, ExportFormatName(), reason);
 }
 
 ComposeResult ComposeGroupSequential(const ProjectTrichromeGroup& group,
@@ -401,7 +352,8 @@ QImage ComposeGroupToEncodedImage(const ProjectTrichromeGroup& group,
                                   int max_edge,
                                   const QString& output_color_space,
                                   int bit_depth,
-                                  QString* reason) {
+                                  QString* reason,
+                                  ImageBuf* linear_output = nullptr) {
     const bool force_mono = sensor_mode != "bayer";
     const bool log_export_timing = decode_mode == DecodeMode::kExport;
     const auto total_start = SteadyClock::now();
@@ -451,6 +403,12 @@ QImage ComposeGroupToEncodedImage(const ProjectTrichromeGroup& group,
                                     {"width", std::to_string(result.rgb.width())},
                                     {"height", std::to_string(result.rgb.height())}});
         }
+    }
+
+    if (linear_output) {
+        *linear_output = std::move(result.rgb);
+        if (reason) *reason = QStringLiteral("ok");
+        return {};
     }
 
     const auto encode_start = SteadyClock::now();
@@ -791,6 +749,50 @@ void TrichromeController::startExport(const QUrl& folder_url,
         exportActiveTo(folder, settings);
 }
 
+void TrichromeController::startExportSelected(const QUrl& folder_url,
+                                              const QVariantList& group_indexes,
+                                              const QString& format,
+                                              const QString& color_space,
+                                              int bit_depth,
+                                              const QString& name_suffix) {
+    if (exporting_) return;
+    QString folder = LocalPathFromUrl(folder_url);
+    if (folder.isEmpty()) {
+        setStatus("Choose an export folder");
+        return;
+    }
+    ExportSettings settings;
+    settings.format = NormalizeExportFormat(format);
+    settings.color_space = NormalizeExportColorSpace(color_space);
+    settings.bit_depth = NormalizeExportBitDepth(bit_depth);
+    settings.name_suffix = NormalizeExportNameSuffix(name_suffix);
+
+    std::vector<int> indexes;
+    indexes.reserve(group_indexes.size());
+    const int complete_groups = static_cast<int>(files_.size()) / 3;
+    for (const QVariant& value : group_indexes) {
+        bool ok = false;
+        const int index = value.toInt(&ok);
+        if (!ok || index < 0 || index >= complete_groups) continue;
+        if (std::find(indexes.begin(), indexes.end(), index) == indexes.end())
+            indexes.push_back(index);
+    }
+    if (indexes.empty()) {
+        setStatus("Select at least one complete frame to export");
+        return;
+    }
+
+    requestBackgroundFrameProcessingStop();
+    if (indexes.size() == 1) {
+        const int previous_active = active_group_;
+        active_group_ = indexes.front();
+        exportActiveTo(folder, settings);
+        active_group_ = previous_active;
+    } else {
+        exportGroupsTo(folder, settings, std::move(indexes));
+    }
+}
+
 QString TrichromeController::displayPath(const QUrl& url) const {
     return LocalPathFromUrl(url);
 }
@@ -849,12 +851,13 @@ void TrichromeController::exportActiveTo(const QString& folder, const ExportSett
         QString reason;
         const QString out = UniqueExportPathForGroup(
             folder, group, ExportExtension(), settings.name_suffix);
-        const QImage image = ComposeGroupToEncodedImage(
+        ImageBuf image;
+        ComposeGroupToEncodedImage(
             group, sensor_mode, DecodeMode::kExport, 0,
-            settings.color_space, settings.bit_depth, &reason);
+            settings.color_space, settings.bit_depth, &reason, &image);
         if (QThread::currentThread()->isInterruptionRequested()) {
             result.status = "Export canceled";
-        } else if (image.isNull()) {
+        } else if (image.empty()) {
             result.status = reason;
         } else {
             if (self) {
@@ -866,7 +869,8 @@ void TrichromeController::exportActiveTo(const QString& folder, const ExportSett
                 }, Qt::QueuedConnection);
             }
             const auto write_start = SteadyClock::now();
-            if (!WriteExportImage(image, out, settings, &reason)) {
+            if (!WriteExport(image, settings.color_space, settings.bit_depth,
+                             out, &reason)) {
                 ObsLog("export.phase", {{"phase", "write_tiff"},
                                         {"group", std::to_string(group_index)},
                                         {"duration_ms", std::to_string(ElapsedMs(write_start))},
@@ -913,14 +917,24 @@ void TrichromeController::exportActiveTo(const QString& folder, const ExportSett
     addWorker(worker, "ExportFrame");
 }
 
-void TrichromeController::exportAllTo(const QString& folder, const ExportSettings& settings) {
-    const int complete_groups = static_cast<int>(files_.size()) / 3;
-    if (complete_groups <= 0) {
+void TrichromeController::exportGroupsTo(const QString& folder,
+                                         const ExportSettings& settings,
+                                         std::vector<int> group_indexes) {
+    if (group_indexes.empty()) {
         setExportProgress(false, 0, 0, {});
         return;
     }
-    for (int i = 0; i < complete_groups; ++i) {
-        for (const auto& path : pathsForGroup(i)) {
+    std::sort(group_indexes.begin(), group_indexes.end());
+    group_indexes.erase(std::unique(group_indexes.begin(), group_indexes.end()),
+                        group_indexes.end());
+    const int complete_groups = static_cast<int>(files_.size()) / 3;
+    for (int index : group_indexes) {
+        if (index < 0 || index >= complete_groups) {
+            setExportProgress(false, 0, 0, {});
+            setStatus("Select complete frames before export");
+            return;
+        }
+        for (const auto& path : pathsForGroup(index)) {
             if (!PathExists(path)) {
                 setExportProgress(false, 0, 0, {});
                 setStatus("Resolve missing sources before export");
@@ -941,16 +955,16 @@ void TrichromeController::exportAllTo(const QString& folder, const ExportSetting
     const int generation = ++export_generation_;
     const QString sensor_mode = sensor_mode_;
     std::vector<ProjectTrichromeGroup> groups;
-    groups.reserve(complete_groups);
-    for (int i = 0; i < complete_groups; ++i) groups.push_back(projectGroupFor(i));
+    groups.reserve(group_indexes.size());
+    for (int index : group_indexes) groups.push_back(projectGroupFor(index));
     ObsLog("command.received", {{"command", "ExportAll"},
-                                {"groups", std::to_string(complete_groups)},
+                                {"groups", std::to_string(groups.size())},
                                 {"format", settings.format.toStdString()},
                                 {"bit_depth", std::to_string(settings.bit_depth)},
                                 {"icc", ExportCanEmbedIcc(settings.color_space) ? "embedded" : "none"},
                                 {"color_space", settings.color_space.toStdString()}});
-    setExportProgress(true, 0, complete_groups,
-                      QString("Exporting frame 1/%1...").arg(complete_groups));
+    setExportProgress(true, 0, static_cast<int>(groups.size()),
+                      QString("Exporting frame 1/%1...").arg(groups.size()));
     setStatus(export_progress_text_);
     setBusy(true);
     QPointer<TrichromeController> self(this);
@@ -990,14 +1004,15 @@ void TrichromeController::exportAllTo(const QString& folder, const ExportSetting
             const QString out = UniqueExportPathForGroup(
                 folder, groups[i], ExportExtension(),
                 settings.name_suffix, &reserved_paths);
-            const QImage image = ComposeGroupToEncodedImage(
+            ImageBuf image;
+            ComposeGroupToEncodedImage(
                 groups[i], sensor_mode, DecodeMode::kExport, 0,
-                settings.color_space, settings.bit_depth, &reason);
+                settings.color_space, settings.bit_depth, &reason, &image);
             if (QThread::currentThread()->isInterruptionRequested()) {
                 result.status = "Export canceled";
                 break;
             }
-            if (image.isNull()) {
+            if (image.empty()) {
                 result.status = QString("Frame %1: %2").arg(i + 1).arg(reason);
                 break;
             }
@@ -1014,7 +1029,8 @@ void TrichromeController::exportAllTo(const QString& folder, const ExportSetting
                 }, Qt::QueuedConnection);
             }
             const auto write_start = SteadyClock::now();
-            if (!WriteExportImage(image, out, settings, &reason)) {
+            if (!WriteExport(image, settings.color_space, settings.bit_depth,
+                             out, &reason)) {
                 ObsLog("export.phase", {{"phase", "write_tiff"},
                                         {"group", std::to_string(groups[i].group_index)},
                                         {"frame", std::to_string(i + 1)},
@@ -1081,6 +1097,18 @@ void TrichromeController::exportAllTo(const QString& folder, const ExportSetting
     worker->setObjectName("ExportAllWorker");
     worker->setStackSize(8 * 1024 * 1024);
     addWorker(worker, "ExportAll");
+}
+
+void TrichromeController::exportAllTo(const QString& folder, const ExportSettings& settings) {
+    const int complete_groups = static_cast<int>(files_.size()) / 3;
+    if (complete_groups <= 0) {
+        setExportProgress(false, 0, 0, {});
+        return;
+    }
+    std::vector<int> group_indexes;
+    group_indexes.reserve(complete_groups);
+    for (int i = 0; i < complete_groups; ++i) group_indexes.push_back(i);
+    exportGroupsTo(folder, settings, std::move(group_indexes));
 }
 
 void TrichromeController::setSensorMode(const QString& value) {

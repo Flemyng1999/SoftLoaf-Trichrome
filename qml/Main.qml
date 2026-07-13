@@ -567,7 +567,7 @@ ApplicationWindow {
                     ThemedButton {
                         text: "Export"
                         enabled: trichromeController.activeGroup >= 0 && !trichromeController.exporting
-                        onClicked: exportWindow.openForExport()
+                        onClicked: exportWindow.openForExport(root.selectedGroups)
                     }
                 }
             }

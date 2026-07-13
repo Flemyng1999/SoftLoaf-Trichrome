@@ -180,6 +180,8 @@ RawDecodeHintInput RawDecodeHintsFromLibRaw(const LibRaw& raw) {
 }
 
 std::string CameraMatrixSourceFromLibRaw(const LibRaw& raw) {
+    if (raw.imgdata.idata.filters == 0 && raw.imgdata.idata.colors <= 1)
+        return "not_applicable_monochrome_intensity";
     return LeicaSl2CameraToXyzD50Override(raw.imgdata.idata.make,
                                           raw.imgdata.idata.model)
         ? "builtin_leica_sl2_dcraw_matrix_v1"
@@ -221,6 +223,9 @@ void ConfigureRawDecodeParams(LibRaw* raw, DecodeMode decode_mode) {
     raw->imgdata.params.no_auto_bright = 1;
     raw->imgdata.params.use_auto_wb = 0;
     raw->imgdata.params.use_camera_wb = 0;
+    // Preserve RAW samples as scene-linear intensity.  This also means an
+    // identified monochrome camera cannot accidentally acquire an RGB matrix
+    // or a display transfer curve during decoding.
     raw->imgdata.params.gamm[0] = 1.0;
     raw->imgdata.params.gamm[1] = 1.0;
     for (float& v : raw->imgdata.params.user_mul) v = 1.0f;
@@ -410,10 +415,16 @@ ImageBuf DecodeRawImage(const std::filesystem::path& path,
         ClassifyRawSensor(RawClassificationFromLibRaw(*raw));
     const RawLinearRec2020Policy rec2020_policy =
         LinearRec2020PolicyFor(raw_class);
-    if (!RawDecodePolicyAllowsTarget(rec2020_policy,
-                                     RawDecodeTarget::kCameraNativeLinear))
+    const RawDecodeTarget target = raw_class == RawSensorClass::kMonochrome
+        ? RawDecodeTarget::kMonochromeIntensityLinear
+        : RawDecodeTarget::kCameraNativeLinear;
+    if (!RawSensorAllowsTarget(raw_class, target))
         return out;
-    out.camera_to_xyz_d50 = CameraToXyzD50(*raw, &out.has_camera_to_xyz_d50);
+    // A monochrome capture is light intensity, rather than camera RGB.  Do
+    // not even read a camera matrix for it: gamma=1 below preserves RAW's
+    // scene-linear samples for the trichrome role plane.
+    if (target != RawDecodeTarget::kMonochromeIntensityLinear)
+        out.camera_to_xyz_d50 = CameraToXyzD50(*raw, &out.has_camera_to_xyz_d50);
 
     ConfigureRawDecodeParams(raw.get(), decode_mode);
     LimitOpenMpForPreviewDecode(decode_mode);
@@ -449,8 +460,8 @@ ImageBuf DecodeRawImage(const std::filesystem::path& path,
         out.state = ColorState::kCameraLinear;
         out.raw_provenance = MakeRawDecodeProvenance(
             raw_class, RawDecodeModeFor(decode_mode),
-            RawDecodeTarget::kCameraNativeLinear);
-        out.color_space = std::string("camera_native_linear_") +
+            target);
+        out.color_space = std::string(RawDecodeTargetColorSpaceName(target)) + "_" +
             RawDecodeModeName(out.raw_provenance.decode_mode) + "_" + RawSensorClassName(raw_class) +
             "_" + RawLinearRec2020PolicyName(rec2020_policy);
     }
@@ -469,8 +480,7 @@ ImageBuf DecodeRawRec2020Image(const std::filesystem::path& path,
     const RawDecodeHintInput decode_hints = RawDecodeHintsFromLibRaw(*raw);
     const RawSensorClass raw_class =
         ClassifyRawSensor(RawClassificationFromLibRaw(*raw));
-    if (!RawDecodePolicyAllowsTarget(LinearRec2020PolicyFor(raw_class),
-                                     RawDecodeTarget::kLinearRec2020))
+    if (!RawSensorAllowsTarget(raw_class, RawDecodeTarget::kLinearRec2020))
         return out;
     ConfigureRawRec2020Params(raw.get(), decode_mode, use_camera_wb);
     LimitOpenMpForPreviewDecode(decode_mode);
@@ -572,7 +582,7 @@ RawProvenanceProbeResult ProbeRawProvenance(const std::filesystem::path& path,
     result.sensor_hints = RawDecodeHintSummary(RawDecodeHintsFromLibRaw(*raw));
     result.provenance = MakeRawDecodeProvenance(
         raw_class, RawDecodeModeFor(decode_mode), target);
-    result.reason = RawDecodePolicyTargetReason(result.provenance.policy, target);
+    result.reason = RawSensorTargetReason(raw_class, target);
     result.ok = result.reason == "ok";
     return result;
 }

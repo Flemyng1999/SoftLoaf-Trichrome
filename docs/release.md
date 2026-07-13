@@ -6,11 +6,12 @@ available under GPLv3.
 Current release target:
 
 ```text
-v0.2.0-beta.4
+v0.2.0
 ```
 
-The CMake project version remains `0.2.0`; the `beta.4` suffix belongs to the
-Git tag, GitHub Release title, DMG filename, and release notes.
+The CMake project version is `0.2.0`; the stable Git tag, GitHub Release title,
+DMG filename, Windows package filenames, and release notes use `v0.2.0` /
+`0.2.0` without an alpha or beta suffix.
 
 The app icon currently reuses the SoftLoaf identity assets from SoftLoaf
 Negative:
@@ -71,7 +72,7 @@ Local unsigned smoke package, for development only:
 
 ```bash
 SOFTLOAF_CODESIGN_IDENTITY="-" \
-SOFTLOAF_TRICHROME_VERSION="0.2.0-beta.4" \
+SOFTLOAF_TRICHROME_VERSION="0.2.0" \
   tools/package_macos_dmg.sh build-release
 ```
 
@@ -79,7 +80,7 @@ Signed package:
 
 ```bash
 SOFTLOAF_CODESIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
-SOFTLOAF_TRICHROME_VERSION="0.2.0-beta.4" \
+SOFTLOAF_TRICHROME_VERSION="0.2.0" \
   tools/package_macos_dmg.sh build-release
 ```
 
@@ -101,7 +102,7 @@ xcrun notarytool store-credentials softloaf-notary \
   --password "app-specific-password"
 
 SOFTLOAF_NOTARY_KEYCHAIN_PROFILE=softloaf-notary \
-  tools/notarize_macos_dmg.sh build-release/SoftLoaf-Trichrome-0.2.0-beta.4-macOS.dmg
+  tools/notarize_macos_dmg.sh build-release/SoftLoaf-Trichrome-0.2.0-macOS.dmg
 ```
 
 Apple's notarization guide:
@@ -193,13 +194,13 @@ When Sparkle, WinSparkle, or another updater exists, add:
 latest.json
 ```
 
-The current workflow names are still accepted for `v0.2.0-beta.4`, but new
-release automation should migrate to the dotted product prefix and underscore
-version separator above so the asset list reads like the benchmark release.
+The current workflow names are still accepted for `v0.2.0`, but new release
+automation should migrate to the dotted product prefix and underscore version
+separator above so the asset list reads like the benchmark release.
 
 Every release note should follow this order:
 
-1. short beta/stability warning;
+1. short stability and support statement;
 2. `Downloads` grouped by platform and architecture;
 3. `Changes`;
 4. `Known Limitations`;
@@ -207,31 +208,30 @@ Every release note should follow this order:
 6. `Packaging Notes` only when the release has unusual constraints.
 
 ```bash
-git add docs/release_notes/v0.2.0-beta.4.md
-git commit -m "Add v0.2.0-beta.4 release notes"
-git tag -a v0.2.0-beta.4 -m "SoftLoaf Trichrome v0.2.0-beta.4"
+git add docs/release_notes/v0.2.0.md
+git commit -m "Add v0.2.0 release notes"
+git tag -a v0.2.0 -m "SoftLoaf Trichrome v0.2.0"
 git push origin main
-git push origin v0.2.0-beta.4
+git push origin v0.2.0
 ```
 
 Create the release as a draft first:
 
 ```bash
-gh release create v0.2.0-beta.4 \
-  build-release/SoftLoaf-Trichrome-0.2.0-beta.4-macOS.dmg \
-  build-release/SoftLoaf-Trichrome-0.2.0-beta.4-macOS.dmg.sha256 \
-  --title "SoftLoaf Trichrome v0.2.0-beta.4" \
-  --notes-file docs/release_notes/v0.2.0-beta.4.md \
-  --draft \
-  --prerelease
+gh release create v0.2.0 \
+  build-release/SoftLoaf-Trichrome-0.2.0-macOS.dmg \
+  build-release/SoftLoaf-Trichrome-0.2.0-macOS.dmg.sha256 \
+  --title "SoftLoaf Trichrome v0.2.0" \
+  --notes-file docs/release_notes/v0.2.0.md \
+  --draft
 ```
 
 Inspect the draft in GitHub before publishing it.
 
 Release publication checklist:
 
-1. create or verify the annotated tag, for example `v0.2.0-beta.4`;
-2. create the GitHub Release as `--draft --prerelease`;
+1. create or verify the annotated tag, for example `v0.2.0`;
+2. create the GitHub Release as a draft;
 3. run the macOS release workflow with draft creation enabled, or upload to the
    existing draft;
 4. run the Windows release workflow with `upload_to_release=true`;
@@ -240,7 +240,7 @@ Release publication checklist:
 6. verify the asset list, checksums, draft flag, and prerelease flag with:
 
 ```bash
-gh release view v0.2.0-beta.4 \
+gh release view v0.2.0 \
   --json tagName,name,url,isDraft,isPrerelease,assets
 ```
 
@@ -269,8 +269,9 @@ Supported Windows versions are Windows 10 and Windows 11. CMake defines
 
 Recommended path:
 
-1. For `v0.2.0-beta.4`, publish Windows only as explicit unsigned tester
-   artifacts.
+1. For `v0.2.0`, publish Windows with explicit signing-state notes; if
+   Authenticode is not configured, keep the Windows assets clearly marked as
+   unsigned.
 2. Before wider Windows release, buy an OV code-signing certificate or set up a
    cloud signing provider.
 3. Sign the app `.exe`, DLLs you ship if appropriate, and the installer/zip
@@ -298,7 +299,7 @@ Run Windows packaging from GitHub Actions, not a local developer shell:
 
 ```bash
 gh workflow run "Release Windows" \
-  -f version=0.2.0-beta.4 \
+  -f version=0.2.0 \
   -f upload_to_release=true
 ```
 
@@ -314,7 +315,7 @@ After the run completes, verify both the workflow and the release draft:
 
 ```bash
 gh run list --workflow "Release Windows" --limit 5
-gh release view v0.2.0-beta.4 --json isDraft,isPrerelease,assets
+gh release view v0.2.0 --json isDraft,isPrerelease,assets
 ```
 
 For the earlier `v0.1.0-alpha.1`, the successful Windows run was `28321855649`.

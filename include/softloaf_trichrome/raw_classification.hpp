@@ -5,7 +5,7 @@
 namespace softloaf::trichrome {
 
 inline constexpr const char* kRawDecodePolicyKey =
-    "raw-boundary-v2:rec2020-cfa-only:packed-fullcolor-fallback:rt-white:sony-packed-hints:canon70d-sraw-white:leica-sl2-matrix";
+    "raw-boundary-v3:rec2020-cfa-only:mono-intensity-linear-no-matrix:packed-fullcolor-fallback:rt-white:sony-packed-hints:canon70d-sraw-white:leica-sl2-matrix";
 inline constexpr const char* kRawProvenanceSchemaKey = "raw-provenance-v1";
 
 enum class RawSensorClass {
@@ -37,6 +37,9 @@ enum class RawDecodeFallbackStatus {
 
 enum class RawDecodeTarget {
     kCameraNativeLinear,
+    // A monochrome RAW is a single intensity plane.  It must never be passed
+    // through an RGB camera matrix; LibRaw's gamma=1 output is already linear.
+    kMonochromeIntensityLinear,
     kLinearRec2020,
 };
 
@@ -159,6 +162,8 @@ inline const char* RawDecodeTargetColorSpaceName(RawDecodeTarget target) {
     switch (target) {
         case RawDecodeTarget::kCameraNativeLinear:
             return "camera_native_linear";
+        case RawDecodeTarget::kMonochromeIntensityLinear:
+            return "intensity_linear";
         case RawDecodeTarget::kLinearRec2020:
             return "rec_2020_linear";
     }
@@ -175,6 +180,15 @@ inline bool RawDecodePolicyAllowsTarget(RawLinearRec2020Policy policy,
     return false;
 }
 
+// Target eligibility cannot be inferred from the Rec.2020 policy alone:
+// monochrome and unsupported multi-channel sensors both use "unsupported" for
+// Rec.2020, but only monochrome RAW has the safe intensity-linear path.
+inline bool RawSensorAllowsTarget(RawSensorClass raw_class, RawDecodeTarget target) {
+    if (target == RawDecodeTarget::kMonochromeIntensityLinear)
+        return raw_class == RawSensorClass::kMonochrome;
+    return RawDecodePolicyAllowsTarget(LinearRec2020PolicyFor(raw_class), target);
+}
+
 inline const char* RawDecodePolicyTargetReason(RawLinearRec2020Policy policy,
                                                RawDecodeTarget target) {
     if (RawDecodePolicyAllowsTarget(policy, target)) return "ok";
@@ -183,6 +197,14 @@ inline const char* RawDecodePolicyTargetReason(RawLinearRec2020Policy policy,
         return "raw_fallback_only_not_rec2020";
     }
     return "raw_unsupported";
+}
+
+inline const char* RawSensorTargetReason(RawSensorClass raw_class,
+                                         RawDecodeTarget target) {
+    if (RawSensorAllowsTarget(raw_class, target)) return "ok";
+    if (target == RawDecodeTarget::kMonochromeIntensityLinear)
+        return "raw_not_monochrome";
+    return RawDecodePolicyTargetReason(LinearRec2020PolicyFor(raw_class), target);
 }
 
 inline RawDecodeProvenance MakeRawDecodeProvenance(

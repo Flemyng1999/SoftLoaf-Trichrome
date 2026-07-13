@@ -80,6 +80,12 @@ class TrichromeController : public QObject {
                                  const QString& color_space,
                                  int bit_depth,
                                  const QString& name_suffix);
+    Q_INVOKABLE void startExportSelected(const QUrl& folder_url,
+                                         const QVariantList& group_indexes,
+                                         const QString& format,
+                                         const QString& color_space,
+                                         int bit_depth,
+                                         const QString& name_suffix);
     Q_INVOKABLE QString displayPath(const QUrl& url) const;
     Q_INVOKABLE void shutdown();
 
@@ -119,6 +125,9 @@ class TrichromeController : public QObject {
     void cancelAndDrainWorkers(int timeout_ms);
     void requestBackgroundFrameProcessingStop();
     void exportActiveTo(const QString& folder, const ExportSettings& settings);
+    void exportGroupsTo(const QString& folder,
+                        const ExportSettings& settings,
+                        std::vector<int> group_indexes);
     void exportAllTo(const QString& folder, const ExportSettings& settings);
     void startBackgroundFrameProcessing();
     void regroup();

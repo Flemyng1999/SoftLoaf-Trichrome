@@ -237,7 +237,7 @@ Local provenance matrix run:
 
 - RAW read entry: `src/desktop_decoder.cpp`, `DecodeLinear()` dispatches RAW-like extensions to `DecodeRawImage()`.
 - Decoder: LibRaw `open_file()` -> `unpack()` -> `dcraw_process()` -> `dcraw_make_mem_image()`.
-- Current RAW output: 16-bit LibRaw processed bitmap converted to `CV_32F` by dividing by 65535, tagged as `ColorState::kCameraLinear` and `camera_native_linear_preview/export`.
+- Current RAW output: 16-bit LibRaw processed bitmap converted to `CV_32F` by dividing by 65535. CFA sources are tagged as `ColorState::kCameraLinear` and `camera_native_linear_preview/export`; true monochrome RAW is tagged `intensity_linear_preview/export` and bypasses camera-matrix handling entirely. LibRaw gamma is pinned to 1, so no additional degamma is applied to RAW intensity samples.
 - Preview mode: LibRaw half-size and no interpolation.
 - Export mode: full-resolution LibRaw interpolation.
 - Trichrome compose path: `ComposeGroupSequential()` extracts role channels for Bayer, then `ComposeMonoRgb()`.

@@ -337,19 +337,19 @@ void TestSafeExportWriterHandlesUnicodeAndFailures() {
     fs::remove_all(root, ec);
     fs::create_directories(root, ec);
 
-    QImage image(12, 10, QImage::Format_RGBX64);
-    image.fill(QColor(60, 120, 180));
+    softloaf::trichrome::ImageBuf image;
+    image.data = cv::Mat(10, 12, CV_32FC3, cv::Scalar(0.25f, 0.5f, 0.75f)).clone();
     QString reason;
     const QString output = desktop::QStringFromPath(root / "中文成片.tiff");
-    assert(desktop::WriteExportImageSafely(
-        image, output, QByteArrayLiteral("tiff"), &reason));
+    assert(desktop::WriteExport(
+        image, QStringLiteral("srgb"), 16, output, &reason));
     assert(reason == QStringLiteral("ok"));
     assert(!QImageReader(output, QByteArrayLiteral("tiff")).read().isNull());
 
     const QString missing_parent =
         desktop::QStringFromPath(root / "disconnected" / "frame.tiff");
-    assert(!desktop::WriteExportImageSafely(
-        image, missing_parent, QByteArrayLiteral("tiff"), &reason));
+    assert(!desktop::WriteExport(
+        image, QStringLiteral("srgb"), 16, missing_parent, &reason));
     assert(!reason.isEmpty());
     assert(!QFileInfo::exists(missing_parent));
 

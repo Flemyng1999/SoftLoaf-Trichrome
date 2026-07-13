@@ -147,7 +147,6 @@ Only terminate processes that were started by the current test run.
 
 ## Current Export Encode Status
 
-Windows export encode still falls back to CPU. The D3D12 backend file exists,
-but `MakeD3D12ExportEncodeBackend()` currently returns `nullptr` in
-`src/export_encode_backend_d3d12.cpp`. A full Windows GPU encode implementation
-still needs an HLSL/D3D12 path equivalent to the Metal encode backend.
+Export color encoding, integer quantization, ICC tagging, and TIFF writing are
+centralized in `src/export_writer.cpp`. Windows uses libtiff's wide-character
+path API; there is no separate D3D12 or Qt TIFF export path.

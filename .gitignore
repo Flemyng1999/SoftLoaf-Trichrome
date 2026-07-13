@@ -21,6 +21,7 @@ CTestTestfile.cmake
 *.aotstats
 
 # Binaries and packages
+artifacts/
 *.app/
 *.dmg
 *.zip
